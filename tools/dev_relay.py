@@ -1,9 +1,11 @@
-"""worker/worker.js 와 똑같이 동작하는 로컬 중계기 + 사이트 미리보기 서버 (개발·테스트용)
+"""worker/worker.js 와 똑같이 동작하는 로컬 중계기 + 빌드된 사이트 미리보기 서버 (개발·테스트용)
 
-    py tools/dev_relay.py            → http://localhost:8787  (site/ 폴더 + 중계 경로)
+    py tools/dev_relay.py            → http://localhost:8787  (web/dist 빌드 결과 + 중계 경로)
     py tools/dev_relay.py --key abc  → 접근 키 필요
 
-브라우저에서 http://localhost:8787/?relay=http://localhost:8787 로 열면 중계가 자동 설정된다.
+개발 중에는 Vite(web 에서 npm run dev → http://127.0.0.1:5173)를 쓰고, 주소에 ?relay=http://127.0.0.1:8787 을 붙여
+이 중계를 쓴다 (배포된 Worker 를 다시 올리기 전에도 새 경로를 시험할 수 있다).
+/__sleep?ms=5000 은 헤드리스 브라우저 캡처가 데이터를 기다리게 하는 용도.
 """
 import argparse
 import json
@@ -14,7 +16,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
-SITE = Path(__file__).resolve().parent.parent / "site"
+SITE = Path(__file__).resolve().parent.parent / "web" / "dist"
 ROUTES = {
     "naver-poll": "https://polling.finance.naver.com/api/realtime/",
     "naver-m": "https://m.stock.naver.com/api/",
@@ -23,6 +25,7 @@ ROUTES = {
     "upbit": "https://api.upbit.com/v1/",
     "yahoo": "https://query1.finance.yahoo.com/v8/finance/chart/",
     "gnews": "https://news.google.com/rss/search",
+    "coinness": "https://api.coinness.com/feed/",
 }
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
 KEY = None

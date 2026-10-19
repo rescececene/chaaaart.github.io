@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>미리보기</title>
+<style>html,body{margin:0;background:#888}iframe{border:0;display:block;background:#fff}</style>
+<iframe id="f"></iframe>
+<script>
+// 개발용(빌드에 포함 안 됨): 정확한 폭의 iframe 으로 앱을 띄워 휴대폰 화면을 흉내낸다
+//   /dev/frame.html?w=390&h=844&wait=8000&relay=http://127.0.0.1:8787&theme=dark#/market/upbit
+// wait: 개발 중계기(tools/dev_relay.py)의 /__sleep 로 load 를 늦춰 헤드리스 캡처가 기다리게 한다
+const q = new URLSearchParams(location.search), f = document.getElementById('f');
+f.width = q.get('w') || 390; f.height = q.get('h') || 844;
+if (q.get('theme')) localStorage.setItem('ml.theme', JSON.stringify(q.get('theme')));
+// ls=키=JSON값 (여러 번 가능) — 예: ls=ml.chartKind="line"
+for (const kv of q.getAll('ls')) { const i = kv.indexOf('='); if (i > 0) localStorage.setItem(kv.slice(0, i), kv.slice(i + 1)); }
+if (q.get('seed')) {
+  localStorage.setItem('ml.portfolio', JSON.stringify([
+    { id: 'a1', sym: 'upbit:KRW-BTC', name: '비트코인', sub: 'BTC', qty: 0.15, avg: 98000000 },
+    { id: 'a2', sym: 'krx:005930', name: '삼성전자', sub: '005930', qty: 40, avg: 250000 },
+    { id: 'a3', sym: 'us:NVDA.O', name: '엔비디아', sub: 'NVDA', qty: 12, avg: 180 },
+    { id: 'a4', sym: 'binance:SOLUSDT', name: '솔라나', sub: 'SOL/USDT', qty: 30, avg: 120 },
+  ]));
+  localStorage.setItem('ml.alerts', JSON.stringify([
+    { id: 'r1', kind: 'sym', sym: 'upbit:KRW-BTC', name: '비트코인', cond: 'price_ge', value: 120000000, on: true },
+    { id: 'r3', kind: 'signal', market: 'upbit', signal: 'vol_spike', on: true },
+  ]));
+}
+f.src = '/' + (q.get('relay') ? '?relay=' + encodeURIComponent(q.get('relay')) : '') + location.hash;
+if (q.get('wait')) { const i = document.createElement('img'); i.hidden = true; i.src = 'http://127.0.0.1:8787/__sleep?ms=' + q.get('wait'); document.body.appendChild(i); }
+</script>

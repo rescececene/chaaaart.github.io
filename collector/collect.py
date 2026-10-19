@@ -1,4 +1,4 @@
-"""GitHub Actions 에서 10분마다 실행 — 스크리너·뉴스·시세 목록을 site/data/*.json 으로 저장
+"""GitHub Actions 에서 10분마다 실행 — 스크리너·뉴스·시세 목록을 web/public/data/*.json 으로 저장
 
     python collector/collect.py                       # 전체
     python collector/collect.py --only upbit,krx      # 일부 시장만
@@ -16,16 +16,20 @@ import time
 import traceback
 import urllib.parse
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import indicators
+import news_ai
 import sources
+import stock_ai
 
-OUT = Path(__file__).resolve().parent.parent / "site" / "data"
+OUT = Path(__file__).resolve().parent.parent / "web" / "public" / "data"  # React 사이트(web/)가 그대로 서빙·빌드
+KST = timezone(timedelta(hours=9))
 SCAN_N = {"upbit": 200, "binance": 260, "krx": 260, "us": 260}  # 종목당 일봉 개수
 BINANCE_TOP = 120  # 바이낸스는 거래대금 상위만
+BRIEFS = []  # 종목 AI 해설용 요약 (시장마다 거래대금·시가총액 순으로 쌓인다)
 NEWS_TOPICS = [  # (키, 표시 이름, 구글 뉴스 검색어)
     ("us", "미국 증시", "뉴욕증시 OR 나스닥 OR 미국 증시"),
     ("krx", "국내 증시", "코스피 OR 코스닥"),
@@ -56,7 +60,7 @@ def write(name, obj):
 
 
 def candle_path(sym):
-    """site/js/data.js 의 staticCandles() 와 같은 규칙"""
+    """web/src/lib/market/candles.ts 의 정적 일봉 경로와 같은 규칙"""
     market, _, code = sym.partition(":")
     return f"candles/{market}/{re.sub(r'[^A-Za-z0-9._-]', '_', code)}.json"
 
@@ -88,6 +92,11 @@ def scan(market, snap, limit):
             continue
         if not a:
             continue
+        if len(out) < stock_ai.TOP_N.get(market, 0):
+            try:
+                BRIEFS.append(stock_ai.brief(q["sym"], q["name"], market, q.get("price"), q.get("chg") if q.get("chg") is not None else a["chg"], a))
+            except Exception as e:
+                print(f"  [{market}] {q['sym']} 해설 요약 실패: {e}")
         # 급등/급락은 일봉 종가 대신 목록 시세의 등락률 기준 (업비트는 09시, 바이낸스는 24시간 기준)
         sig = [s for s in a["signals"] if s not in ("surge", "plunge")]
         chg = q["chg"] if q.get("chg") is not None else a["chg"]
@@ -103,8 +112,65 @@ def scan(market, snap, limit):
     return {"market": market, "updatedAt": now_iso(), "count": len(out), "fails": fails, "rows": out}
 
 
+WORLD_NEWS_URL = "https://api.stock.naver.com/news/worldNews?pageSize=50&page=1"
+
+
+def world_news():
+    """해외 증시 속보 — 네이버 증권이 제공하는 로이터 등 번역 기사. 제목·짧은 요약·원문(네이버) 링크만 담는다."""
+    items = []
+    for x in json.loads(sources.http_get(WORLD_NEWS_URL)):
+        title = (x.get("tit") or "").strip()
+        if not title:
+            continue
+        try:
+            ts = int(datetime.strptime(x["dt"][:14], "%Y%m%d%H%M%S").replace(tzinfo=KST).timestamp())
+        except Exception:
+            ts = None
+        summary = re.sub(r"\s+", " ", x.get("subcontent") or "").strip()
+        # 네이버가 붙여 주는 관련 종목 (지수 '.SOX' 같은 것은 뺀다)
+        rel = [{"sym": "us:" + r["reutersCode"], "name": r.get("itemName") or r["reutersCode"]}
+               for r in (x.get("relatedItems") or []) if r.get("reutersCode") and not r["reutersCode"].startswith(".")]
+        items.append({"id": f"{x.get('oid', '')}-{x.get('aid', '')}", "title": title, "src": (x.get("ohnm") or "").strip(), "ts": ts,
+                      "summary": summary[:160], "rel": rel[:4],
+                      "url": "https://m.stock.naver.com/news/read?" + urllib.parse.urlencode({"oid": x.get("oid", ""), "aid": x.get("aid", "")})})
+    return items
+
+
+COINNESS = {  # (키, 표시 이름, API 경로, 글 주소)
+    "coinflash": ("코인 속보", "/feed/v3/breaking-news", "https://coinness.com/news/{id}"),
+    "stockflash": ("주식 속보", "/feed/v1/stock-breaking-news", "https://coinness.com/stock-news/{id}"),
+}
+
+
+def coinness_news(path, link):
+    """코인니스 속보 — 제목·짧은 미리보기·원문 링크와 호재/악재 투표 수만 담는다 (본문 전체를 다시 싣지 않는다)"""
+    items = []
+    for x in json.loads(sources.http_get("https://api.coinness.com" + path + "?languageCode=ko&limit=40")):
+        title = (x.get("title") or "").strip()
+        if not title:
+            continue
+        try:
+            ts = int(datetime.fromisoformat(x["publishAt"].replace("Z", "+00:00")).timestamp())
+        except Exception:
+            ts = None
+        body = re.sub(r"\s+", " ", x.get("content") or "").strip()
+        items.append({"id": str(x.get("id")), "title": title, "src": "코인니스", "ts": ts, "summary": body[:110] + ("…" if len(body) > 110 else ""),
+                      "url": link.format(id=x.get("id")), "bull": x.get("bullCount"), "bear": x.get("bearCount"),
+                      "important": bool(x.get("isImportant")), "codes": [c for c in (x.get("originCodes") or []) if c][:4]})
+    return items
+
+
 def news():
     topics = []
+    try:
+        topics.append({"key": "world", "label": "해외 속보", "items": world_news()})
+    except Exception as e:
+        print(f"[뉴스] 해외 속보 실패: {e}")
+    for key, (label, path, link) in COINNESS.items():
+        try:
+            topics.append({"key": key, "label": label, "items": coinness_news(path, link)})
+        except Exception as e:
+            print(f"[뉴스] {label} 실패: {e}")
     for key, label, q in NEWS_TOPICS:
         url = "https://news.google.com/rss/search?" + urllib.parse.urlencode(
             {"q": q + " when:1d", "hl": "ko", "gl": "KR", "ceid": "KR:ko"})
@@ -179,9 +245,18 @@ def main():
     for t in threads:
         t.start()
     if not args.no_news:
-        write("news.json", {"updatedAt": now_iso(), "topics": news()})
+        topics = news()
+        write("news.json", {"updatedAt": now_iso(), "topics": topics})
+        try:  # 속보 호재·악재 AI 판단 (Cloudflare Workers AI · 비밀값이 없으면 건너뜀)
+            news_ai.run(topics, OUT / "news_ai.json")
+        except Exception:
+            traceback.print_exc()
     for t in threads:
         t.join()
+    try:  # 시장별 주요 종목 AI 해설 (하루 2번 정도 · 비밀값이 없으면 건너뜀)
+        stock_ai.run(BRIEFS, OUT / "stock_ai.json")
+    except Exception:
+        traceback.print_exc()
 
     write("meta.json", {"updatedAt": now_iso(), "secs": round(time.time() - t0), "errors": errors})
     print(f"완료 {time.time() - t0:.0f}초" + (f" / 오류: {errors}" if errors else ""))

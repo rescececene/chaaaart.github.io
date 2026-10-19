@@ -5,6 +5,7 @@
  *   - 네이버 증권: 외부 사이트에서 부르면 403 → 국내·미국 주식 실시간 시세, 차트, 검색
  *   - 업비트: 브라우저 요청은 IP당 10초에 1번 정도로 제한 → 캔들 조회
  *   - 야후 파이낸스: 미국 주식 분봉 / 구글 뉴스: 종목별 뉴스 RSS
+ *   - 코인니스: 코인·주식 속보 (브라우저에서 직접 부르면 CORS 로 막힌다)
  *
  * 요청 형식:  https://<worker 주소>/<경로 이름>/<나머지 경로>?<쿼리>
  *   예) /naver-poll/domestic/stock/005930
@@ -24,6 +25,7 @@ const ROUTES = {
   'upbit': 'https://api.upbit.com/v1/',
   'yahoo': 'https://query1.finance.yahoo.com/v8/finance/chart/',
   'gnews': 'https://news.google.com/rss/search',
+  'coinness': 'https://api.coinness.com/feed/', // 코인·주식 속보 (feed 아래만)
 };
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
 

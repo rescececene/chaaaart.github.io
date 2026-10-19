@@ -1,0 +1,162 @@
+﻿@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* 테마는 html[data-theme="light|dark"] 로 정한다 ('자동'이면 기기 설정을 읽어 둘 중 하나를 넣는다) */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme inline {
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-heading: var(--font-sans);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  /* 마켓렌즈 전용 — 상승 빨강 · 하락 파랑 (그래픽용 / 글자용 따로), 회색 단계 */
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-up-text: var(--up-text);
+  --color-down-text: var(--down-text);
+  --color-up-soft: var(--up-soft);
+  --color-down-soft: var(--down-soft);
+  --color-page: var(--page);
+  --color-subtle: var(--subtle);
+  --color-faint: var(--faint);
+  --color-hover: var(--hover);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* 라이트 — 토스 디자인 시스템 회색 단계 기반 */
+:root {
+  color-scheme: light;
+  --page: #f2f4f6;            /* 페이지 바탕 (카드 사이 회색) */
+  --background: #ffffff;      /* 카드·헤더 */
+  --foreground: #191f28;      /* grey900 */
+  --card: #ffffff;
+  --card-foreground: #191f28;
+  --popover: #ffffff;
+  --popover-foreground: #191f28;
+  --primary: #3182f6;         /* 토스 파랑 — 버튼 */
+  --primary-foreground: #ffffff;
+  --secondary: #f2f4f6;       /* grey100 — 보조 버튼·칩 */
+  --secondary-foreground: #333d4b;
+  --muted: #f2f4f6;
+  --muted-foreground: #6b7684; /* grey600 — 보조 글자 (4.9:1) */
+  --subtle: #8b95a1;          /* grey500 — 큰 보조 글자·아이콘 */
+  --faint: #b0b8c1;           /* grey400 — 비활성 */
+  --hover: #f9fafb;           /* grey50 — 행 hover */
+  --accent: #f2f4f6;
+  --accent-foreground: #191f28;
+  --destructive: #f04452;
+  --border: #e5e8eb;          /* grey200 */
+  --input: #e5e8eb;
+  --ring: #3182f6;
+  --up: #f04452;              /* 상승 — 캔들·막대 */
+  --down: #3182f6;            /* 하락 */
+  --up-text: #e02b3a;         /* 상승 글자 (4.6:1) */
+  --down-text: #1b64da;       /* 하락 글자 (5.4:1) */
+  --up-soft: rgba(240, 68, 82, 0.1);
+  --down-soft: rgba(49, 130, 246, 0.1);
+  --good: #03b26c;
+  --warn: #fe9800;
+  /* 이동평균 4색 — 검증된 범주형 팔레트 순서 (주황·청록·노랑·자홍) */
+  --chart-1: #eb6834;
+  --chart-2: #1baf7a;
+  --chart-3: #eda100;
+  --chart-4: #e87ba4;
+  --chart-5: #6250d6;         /* RSI */
+  --radius: 0.875rem;
+}
+
+/* 다크 */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #101013;
+  --background: #17171c;
+  --foreground: #ececf0;
+  --card: #1d1d24;
+  --card-foreground: #ececf0;
+  --popover: #24242c;
+  --popover-foreground: #ececf0;
+  --primary: #4593fc;
+  --primary-foreground: #ffffff;
+  --secondary: #2a2a33;
+  --secondary-foreground: #d4d4da;
+  --muted: #2a2a33;
+  --muted-foreground: #9e9ea8;
+  --subtle: #7e7e88;
+  --faint: #5a5a64;
+  --hover: #23232b;
+  --accent: #2a2a33;
+  --accent-foreground: #ececf0;
+  --destructive: #f2555f;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.12);
+  --ring: #4593fc;
+  --up: #f2555f;
+  --down: #4593fc;
+  --up-text: #ff6b74;
+  --down-text: #5aa2ff;
+  --up-soft: rgba(242, 85, 95, 0.16);
+  --down-soft: rgba(69, 147, 252, 0.16);
+  --good: #20c77d;
+  --warn: #ffab2e;
+  --chart-1: #d95926;
+  --chart-2: #199e70;
+  --chart-3: #c98500;
+  --chart-4: #d55181;
+  --chart-5: #9085e9;
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  html { @apply font-sans; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
+  body { @apply bg-page text-foreground antialiased; font-size: 15px; letter-spacing: -0.01em; min-height: 100dvh; }
+  button:not(:disabled), [role="button"]:not(:disabled) { cursor: pointer; }
+  .tabular { font-variant-numeric: tabular-nums; }
+}
+
+@layer utilities {
+  .no-scrollbar { scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  /* 가격이 바뀔 때 잠깐 배경이 물드는 효과 */
+  .flash-up { animation: flash-up 0.8s ease-out; }
+  .flash-down { animation: flash-down 0.8s ease-out; }
+  /* 누를 때 살짝 들어가는 토스식 반응 */
+  .press { transition: transform 0.12s ease, background-color 0.15s ease; }
+  .press:active { transform: scale(0.98); }
+}
+@keyframes flash-up { from { background-color: var(--up-soft); } to { background-color: transparent; } }
+@keyframes flash-down { from { background-color: var(--down-soft); } to { background-color: transparent; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .flash-up, .flash-down { animation: none; }
+  .press:active { transform: none; }
+}

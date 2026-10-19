@@ -19,7 +19,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
 
@@ -27,37 +27,53 @@ jobs:
         with:
           python-version: "3.13"
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
       # 어떤 시장 수집이 실패해도 직전 데이터를 그대로 내보내도록 이전 결과를 먼저 깔아 둔다
       # (종목별 일봉 파일은 매번 새로 만들고 크기가 커서 캐시에서 뺀다)
       - name: 이전 데이터 불러오기
         uses: actions/cache/restore@v6
         with:
           path: |
-            site/data
-            !site/data/candles
+            web/public/data
+            !web/public/data/candles
           key: data-${{ github.run_id }}
           restore-keys: data-
 
+      # 뉴스 호재·악재 AI 판단은 Cloudflare Workers AI 를 직접 부른다 (중계 Worker 와 무관).
+      # Secret 두 개가 없으면 그 단계만 건너뛴다.
       - name: 스크리너·뉴스·시세 목록 수집
         run: python collector/collect.py
         env:
           PYTHONIOENCODING: utf-8
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_AI_TOKEN: ${{ secrets.CF_AI_TOKEN }}
+
+      # PREDICT_STEPS (예측 엔진 단계는 collector/model 완성 후 추가)
 
       - name: 데이터 저장
         uses: actions/cache/save@v6
         with:
           path: |
-            site/data
-            !site/data/candles
+            web/public/data
+            !web/public/data/candles
           key: data-${{ github.run_id }}
 
-      - name: 설정 화면의 [Worker 코드 복사]용
-        run: cp worker/worker.js site/worker.js
+      - name: 사이트 빌드 (React)
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          cp ../worker/worker.js dist/worker.js
 
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: site
+          path: web/dist
 
   deploy:
     needs: build

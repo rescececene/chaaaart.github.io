@@ -247,3 +247,54 @@ def overview():
         except Exception as e:
             print(f"[지수] {kind} 실패: {e}")
     return out
+
+
+# ── 예측 엔진(collector/model) 대량 일봉 수집용 ─────────────────────────
+# daily() 와 같은 결과를 내되, 요청마다 제한 시간·재시도를 줄여 응답 없이 매달리는 서버에 오래 붙잡히지 않게 한다.
+# (기존 함수는 그대로 — collect.py 동작은 바뀌지 않는다)
+def daily_quick(sym, n, timeout=8, retries=1):
+    kw = {"timeout": timeout, "retries": retries}
+    market, _, code = sym.partition(":")
+    if market == "upbit":
+        raw, to = [], None
+        while len(raw) < n:
+            cnt = min(200, n - len(raw))
+            url = f"https://api.upbit.com/v1/candles/days?market={code}&count={cnt}"
+            if to:
+                url += "&to=" + urllib.parse.quote(to)
+            page = http_json(url, **kw)
+            raw += page
+            if len(page) < cnt:
+                break
+            to = page[-1]["candle_date_time_utc"].replace("T", " ")
+        return _dedupe([{"t": _date_ts(d["candle_date_time_kst"][:10].replace("-", "")),
+                         "o": d["opening_price"], "h": d["high_price"], "l": d["low_price"],
+                         "c": d["trade_price"], "v": d["candle_acc_trade_volume"]} for d in raw])
+    if market == "binance":
+        path = f"/api/v3/klines?symbol={urllib.parse.quote(code)}&interval=1d&limit={min(n, 1000)}"
+        data, last = None, None
+        for host in list(BINANCE_HOSTS):  # 막힘(403/451)뿐 아니라 시간 초과 때도 다음 호스트(미러)로
+            try:
+                data = http_json(host + path, **kw)
+                break
+            except urllib.error.HTTPError as e:
+                if e.code not in (403, 451):
+                    raise
+                last = e
+            except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+                last = e
+        if data is None:
+            raise last
+        return [{"t": k[0] // 1000, "o": float(k[1]), "h": float(k[2]), "l": float(k[3]),
+                 "c": float(k[4]), "v": float(k[5])} for k in data]
+    kind = "domestic" if market == "krx" else "foreign"
+    now = datetime.now(KST)
+    start = (now - timedelta(days=int(n * 1.5) + 10)).strftime("%Y%m%d") + "0000"
+    end = (now + timedelta(days=1)).strftime("%Y%m%d") + "0000"
+    d = http_json(f"https://api.stock.naver.com/chart/{kind}/item/{code}/day?startDateTime={start}&endDateTime={end}", **kw)
+    out = []
+    for x in d:
+        c = x["closePrice"]
+        out.append({"t": _date_ts(x["localDate"]), "o": x["openPrice"] or c, "h": x["highPrice"] or c,
+                    "l": x["lowPrice"] or c, "c": c, "v": x.get("accumulatedTradingVolume") or 0})
+    return _dedupe(out)[-n:]

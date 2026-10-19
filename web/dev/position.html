@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>내 평단 진단 미리보기</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+<script>
+// 개발용(빌드에 포함 안 됨): 내 평단 진단 카드를 실제 데이터로 띄운다
+//   /dev/position.html?sym=upbit:KRW-BTC&mul=1.08&qty=0.15&theme=dark&layout=left&relay=http://127.0.0.1:8787
+//   sym: 종목 · avg: 평단(그대로) · mul: 평단 = 현재가 × mul (처음 한 번) · qty: 수량 · clear=1: 저장된 평단 지우고 입력 화면
+//   layout: mobile(기본, 차트 화면 휴대폰 폭 그대로) · left(PC 왼쪽 넓은 칸) · right(PC 오른쪽 340px 칸) · theme: light/dark
+const q = new URLSearchParams(location.search);
+if (q.get('theme')) localStorage.setItem('ml.theme', JSON.stringify(q.get('theme')));
+try { var t = JSON.parse(localStorage.getItem('ml.theme') || '"auto"'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="./position-harness.tsx"></script>
+</body>
+</html>

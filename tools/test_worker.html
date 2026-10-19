@@ -27,6 +27,7 @@ const cases = [
   ['키 미설정이면 사이트만', req('/naver-poll/domestic/stock/005930', ''), {}, 401],
   ['키 미설정 + 사이트', req('/naver-m/stocks/marketValue/KOSPI?page=1', SITE), {}, 200, () => calls.at(-1) === 'https://m.stock.naver.com/api/stocks/marketValue/KOSPI?page=1'],
   ['검색(경로 없음)', req('/naver-ac?q=%EC%82%BC%EC%84%B1&target=stock', SITE), env, 200, () => calls.at(-1) === 'https://ac.stock.naver.com/ac?q=%EC%82%BC%EC%84%B1&target=stock'],
+  ['코인니스 속보 (feed 아래만)', req('/coinness/v3/breaking-news?languageCode=ko&limit=40', SITE), env, 200, () => calls.at(-1) === 'https://api.coinness.com/feed/v3/breaking-news?languageCode=ko&limit=40'],
   ['모르는 경로', req('/evil/x', SITE), env, 404],
   ['상위 폴더 접근 (URL 정규화로 /x 가 되어 막힘)', req('/naver-api/../x', SITE), env, 404],
   ['POST 거부', req('/naver-poll/x', SITE, 'POST'), env, 405],
