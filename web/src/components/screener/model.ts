@@ -99,4 +99,4 @@ export const opTone = (label: string): Tone => (label.includes('매수') ? 'up' 
 export const signalName = (k: string) => SIGNALS[k]?.[0] ?? k;
 
 /** PC 표의 열 — 머리글과 행이 같은 격자를 쓴다 */
-export const WIDE_GRID = 'grid grid-cols-[minmax(150px,1fr)_minmax(0,1.3fr)_112px_88px_76px_44px_64px_72px] items-center gap-x-4';
+export const WIDE_GRID = 'grid grid-cols-[40px_minmax(120px,1fr)_minmax(0,1.25fr)_120px_88px_76px_44px_60px_72px] items-center gap-x-3';

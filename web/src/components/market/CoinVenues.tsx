@@ -6,15 +6,16 @@ import type { Sym } from '@/lib/market';
 
 const EX_ITEMS = COIN_EXES.map((ex) => ({
   value: ex,
-  label: <>{EX_NAME[ex]}<span className="font-medium opacity-60"> · {EX_UNIT[ex]}</span></>,
+  // 보조 글자는 500 회색 — 앞 공백이 flex 에서 사라지므로 여백으로 띄운다
+  label: <>{EX_NAME[ex]}<span className="ml-[.3em] font-medium text-muted-foreground">· {EX_UNIT[ex]}</span></>,
 }));
 
 /** [업비트 · 원화 | 바이낸스 · USDT] — 휴대폰은 폭 가득, 넓은 화면은 320px.
- *  onPage: 카드 밖 회색 바탕 위에 놓일 때 — 홈을 한 단계 진하게 해서 바탕과 구분한다 */
-export function CoinExSwitch({ value, onChange, className, onPage }: { value: CoinEx; onChange: (ex: CoinEx) => void; className?: string; onPage?: boolean }) {
+ *  회색 바탕 위에 놓이면 홈이 바탕과 같은 색이 되어 흰 손잡이만 보인다 (토스식) */
+export function CoinExSwitch({ value, onChange, className }: { value: CoinEx; onChange: (ex: CoinEx) => void; className?: string }) {
   return (
     <div role="group" aria-label="코인 거래소" className={className}>
-      <Segmented full items={EX_ITEMS} value={value} onChange={onChange} className={cn('sm:w-80', onPage && 'bg-border/80 dark:bg-white/[0.07]')} />
+      <Segmented full items={EX_ITEMS} value={value} onChange={onChange} className="md:w-80" />
     </div>
   );
 }
@@ -26,7 +27,7 @@ export function VenueBadges({ sym, className }: { sym: Sym; className?: string }
   return (
     <span className={cn('inline-flex shrink-0 items-center gap-1', className)}>
       {list.map((s) => (
-        <span key={s} className="rounded-[5px] bg-secondary px-1.5 text-[11px] leading-[18px] font-semibold whitespace-nowrap text-muted-foreground">
+        <span key={s} className="rounded-md bg-secondary px-1.5 text-[12px] leading-5 font-semibold whitespace-nowrap text-muted-foreground">
           {EX_NAME[coinExOf(s)!]}
         </span>
       ))}

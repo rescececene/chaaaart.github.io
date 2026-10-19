@@ -27,8 +27,16 @@ export type FeedKind = 'coin' | 'stock' | 'mixed';
 /** 이 수 이상 투표가 모여야 투표로 판단한다 */
 export const MIN_VOTES = 20;
 /** 피드별 '보통 뉴스'의 호재 표 비율 — 코인 속보 이용자는 호재 쪽으로, 지정학 소식이 많은 주식 속보 이용자는 악재 쪽으로 기운다
- *  (코인니스 실제 표: 코인 속보 중립 기사 ≈ 50~55%, 주식 속보 중립 기사 ≈ 35~45%) */
-export const VOTE_NEUTRAL: Record<string, number> = { coinflash: 0.55, stockflash: 0.4 };
+ *  코인 속보: 2024-01~2026-10 코인니스 1만 4천여 건 실측 — 보통 기사도 호재 표가 84~92% (중앙값 0.84).
+ *  예전 기준(0.55)으로는 기사 82% 가 '호재'로 나와 뜻이 없었다 → 중앙값 기준으로 위·아래 꼬리만 호재·악재로 본다. */
+export const VOTE_NEUTRAL: Record<string, number> = { coinflash: 0.84, stockflash: 0.4 };
+/** 투표 판단 기준 — 호재: 표 비율 하한이 good 이상 · 악재: 상한이 bad 이하 · 미친: 관심 폭발(중요·평소 2배 표)이면서 더 극단 */
+interface VoteRef { good: number; bad: number; crazyGood: number; crazyBad: number }
+function voteRef(base: number): VoteRef {
+  // 코인 속보처럼 기준이 높은 피드는 위쪽 여유가 좁다 (실측 분포: 호재 ≥ 0.89, 악재 ≤ 0.66)
+  if (base >= 0.75) return { good: base + 0.05, bad: base - 0.18, crazyGood: Math.min(0.97, base + 0.11), crazyBad: base - 0.34 };
+  return { good: base + 0.12, bad: base - 0.1, crazyGood: base + 0.3, crazyBad: base - 0.25 };
+}
 
 /** k/n 비율의 Wilson 구간 (z=1 ≈ 68%) — 표가 적을수록 넓어져 섣불리 판단하지 않는다 */
 function wilson(k: number, n: number, z = 1): [number, number] {
@@ -90,9 +98,10 @@ export function sentimentOf(it: NewsItem, feedMedianVotes: number, ai?: AiTag | 
   if (n >= MIN_VOTES) {
     const p = bull / n, [lo, hi] = wilson(bull, n);
     const hot = !!it.important || (feedMedianVotes > 0 && n >= 2 * feedMedianVotes); // 중요 표시거나 관심이 평소의 2배 이상
+    const r = voteRef(neutral);
     let level: Level = 0;
-    if (lo >= neutral + 0.12) level = hot && p >= neutral + 0.3 ? 2 : 1;
-    else if (hi <= neutral - 0.1) level = hot && p <= neutral - 0.25 ? -2 : -1;
+    if (lo >= r.good) level = hot && p >= r.crazyGood ? 2 : 1;
+    else if (hi <= r.bad) level = hot && p <= r.crazyBad ? -2 : -1;
     return { level, label: LEVEL_LABEL[level], basis: 'votes', base: neutral, ...v };
   }
   const k = keywordHits(`${it.title} ${it.summary || ''}`);

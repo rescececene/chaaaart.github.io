@@ -26,7 +26,7 @@ export function Sparkline({ data, width = 96, height = 32, className, area = tru
           <path d={fill} fill={`url(#${id})`} />
         </>
       )}
-      <path d={d} fill="none" stroke={color} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+      <path d={d} fill="none" stroke={color} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
 }

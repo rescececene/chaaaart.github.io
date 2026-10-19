@@ -29,6 +29,20 @@ const ROUTES = {
 };
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
 
+// 같은 IP 가 1분에 너무 많이 부르면 잠시 막는다 — 남이 Origin 을 흉내 내 무료 한도(계정 전체 하루 10만 건)를
+// 다 써 버리는 것을 늦추는 장치. Worker 인스턴스 메모리 기준이라 대략적이다 (사이트 한 화면은 1분에 100~200건 정도).
+const RATE_WINDOW_MS = 60000;
+const RATE_MAX = 900;
+const hits = new Map(); // ip → { start, n }
+function limited(ip) {
+  const now = Date.now();
+  let h = hits.get(ip);
+  if (!h || now - h.start > RATE_WINDOW_MS) { h = { start: now, n: 0 }; hits.set(ip, h); }
+  h.n++;
+  if (hits.size > 5000) for (const [k, v] of hits) if (now - v.start > RATE_WINDOW_MS) hits.delete(k);
+  return h.n > RATE_MAX;
+}
+
 function reply(obj, status, cors) {
   return new Response(JSON.stringify(obj), {
     status,
@@ -54,12 +68,18 @@ export default {
     if (request.method !== 'GET') return reply({ error: 'GET 요청만 됩니다' }, 405, cors);
     if (url.pathname === '/') return reply({ ok: true, service: 'market-lens relay', access: fromSite || keyOk, keyOk }, 200, cors);
     if (!fromSite && !keyOk) return reply({ error: '허용되지 않은 요청입니다' }, 401, cors);
+    if (url.pathname.length + url.search.length > 2000) return reply({ error: '주소가 너무 깁니다' }, 414, cors);
+    if (limited(request.headers.get('CF-Connecting-IP') || 'unknown')) {
+      return new Response(JSON.stringify({ error: '요청이 너무 많습니다. 잠시 뒤 다시 시도하세요' }), {
+        status: 429, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Retry-After': '30', ...cors },
+      });
+    }
 
     const m = url.pathname.match(/^\/([a-z-]+)(?:\/(.*))?$/);
     const base = m && ROUTES[m[1]];
     if (!base) return reply({ error: '알 수 없는 경로' }, 404, cors);
     const rest = m[2] || '';
-    if (rest.includes('..')) return reply({ error: '잘못된 경로' }, 400, cors);
+    if (/\.\.|%2e%2e/i.test(rest)) return reply({ error: '잘못된 경로' }, 400, cors); // 경로 거슬러 오르기 차단 (인코딩 포함)
     url.searchParams.delete('k');
 
     let upstream;

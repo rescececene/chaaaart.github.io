@@ -1,6 +1,7 @@
 // 사용자 데이터 (이 기기의 브라우저에 저장) — 관심종목·화면 설정
 import { coinKey, sameCoin } from '@/lib/coins';
 import { createLocalStore } from '@/lib/localStore';
+import { createSecureStore } from '@/lib/secureStore';
 import { nameOf, remember, type Sym } from '@/lib/market';
 
 export interface WatchItem { sym: Sym; name: string; sub: string }
@@ -13,7 +14,8 @@ const DEFAULT_WATCH: WatchItem[] = [
   { sym: 'us:NVDA.O', name: '엔비디아', sub: 'NVDA' }, { sym: 'us:AAPL.O', name: '애플', sub: 'AAPL' },
 ];
 
-export const watchStore = createLocalStore<WatchItem[]>('ml.watch', DEFAULT_WATCH);
+/** 관심종목 — 이 기기 안에서 암호화해 저장 (lib/secureStore.ts) */
+export const watchStore = createSecureStore<WatchItem[]>('ml.watch', DEFAULT_WATCH);
 export const themeStore = createLocalStore<ThemePref>('ml.theme', 'auto');
 export const indStore = createLocalStore<IndToggles>('ml.ind', { ma: true, bb: false, vol: true, rsi: true, macd: true, cross: false, forecast: true });
 

@@ -9,8 +9,8 @@ import { ThemeCard } from '@/components/settings/ThemeCard';
 import { DataStatusCard } from '@/components/settings/DataStatusCard';
 
 const SECTIONS = ['relay', 'backup', 'theme', 'data'];
-// 고정 머리글(휴대폰: 로고+탭+시세 띠, PC: 로고+시세 띠) 아래로 카드 머리가 보이게
-const ANCHOR = 'scroll-mt-36 md:scroll-mt-24';
+// 고정 머리글(PC 64px) 아래로 카드 머리가 보이게 — 휴대폰 머리글은 내려갈 때 숨는다
+const ANCHOR = 'scroll-mt-3 md:scroll-mt-20';
 
 export default function SettingsPage({ args }: PageProps) {
   // 백업으로 중계 설정이 바뀌면 중계 카드를 새로 띄워 입력값·상태를 다시 읽는다
@@ -18,8 +18,8 @@ export default function SettingsPage({ args }: PageProps) {
   const section = SECTIONS.includes(args[0]) ? args[0] : null;
 
   useEffect(() => {
-    document.title = '설정 — 마켓렌즈';
-    return () => { document.title = '마켓렌즈'; };
+    document.title = '설정 — 마켓';
+    return () => { document.title = '마켓'; };
   }, []);
   useEffect(() => {
     if (!section) return;
@@ -30,14 +30,14 @@ export default function SettingsPage({ args }: PageProps) {
   return (
     <>
       <PageTitle>설정</PageTitle>
-      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="min-w-0 space-y-3">
+      <div className="grid items-start gap-2 sm:gap-3 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-4">
+        <div className="min-w-0 space-y-2 sm:space-y-3 lg:space-y-4">
           <div id="settings-relay" className={ANCHOR}><RelayCard key={relayKey} /></div>
           <div id="settings-backup" className={ANCHOR}>
             <BackupCard onApplied={(relayChanged) => { if (relayChanged) setRelayKey((k) => k + 1); }} />
           </div>
         </div>
-        <div className="min-w-0 space-y-3">
+        <div className="min-w-0 space-y-2 sm:space-y-3 lg:space-y-4">
           <div id="settings-theme" className={ANCHOR}><ThemeCard /></div>
           <div id="settings-data" className={ANCHOR}><DataStatusCard /></div>
         </div>

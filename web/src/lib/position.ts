@@ -108,7 +108,8 @@ export interface DiagInput {
   f?: (x: number) => string;
 }
 
-const pc = (x: number, d = 1) => `${x > 0 ? '+' : ''}${x.toFixed(d)}%`;
+/** 부호 % — '+6.2%' · '−3.9%' (음수 부호는 U+2212) */
+const pc = (x: number, d = 1) => { const r = Number(x.toFixed(d)); return `${r > 0 ? '+' : r < 0 ? '−' : ''}${Math.abs(r).toFixed(d)}%`; };
 const gap = (from: number, to: number) => (to / from - 1) * 100;
 const absPct = (x: number) => Math.abs(x).toFixed(Math.abs(x) < 1 ? 2 : 1);
 /** 계산으로 만든 선(손절 고려선 등)은 유효숫자 4자리로 — 112,932,307 → 112,900,000 · 180.237 → 180.2 */

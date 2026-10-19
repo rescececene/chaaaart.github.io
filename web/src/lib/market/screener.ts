@@ -61,3 +61,14 @@ export function predictSymbol(sym: Sym) {
 
 // ── 종목 AI 해설 (collector/stock_ai.py — 시장별 주요 종목만, 하루 2번 정도) ──
 export const stockAi = () => staticJSON<StockAi>('stock_ai.json', 10 * 60e3);
+
+// ── 전략 탭 과거 검증 (collector/setups.py --stats, 하루 1번) ──
+export interface SetupHorizon { n: number; avgEx: number; medEx: number; win: number; up: number; mktUp: number; pop: number; popMkt: number; ci: [number, number] }
+export interface SetupStat { nRaw: number; h5?: SetupHorizon; h20?: SetupHorizon; grade: 'good' | 'weak' | 'none'; opp?: boolean }
+export interface SetupsStats {
+  updatedAt: string; method?: string;
+  /** dir: +1 = 오를 쪽 신호, -1 = 경고(내릴 쪽) */
+  defs: Record<string, { emoji: string; name: string; desc: string; dir: 1 | -1 }>;
+  markets: Partial<Record<Market, Record<string, SetupStat>>>;
+}
+export const setupsStats = () => staticJSON<SetupsStats>('setups_stats.json', 30 * 60e3);

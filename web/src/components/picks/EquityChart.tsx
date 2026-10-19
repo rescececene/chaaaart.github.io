@@ -1,6 +1,9 @@
 // 백테스트 누적 곡선 — 모델 상위 10% vs 시장 전체 평균 (한 축, 1에서 시작)
 import { useMemo, useState } from 'react';
-import { fmtRatio } from '@/lib/format';
+import { fmtRatio as fmtRatioRaw } from '@/lib/format';
+
+/** 음수 부호는 U+2212 */
+const fmtRatio = (x: number | null | undefined, d?: number) => fmtRatioRaw(x, d).replace(/^-/, '−');
 
 interface Pt { t: string; top: number; all: number }
 
@@ -22,9 +25,9 @@ export function EquityChart({ data, height = 180 }: { data: Pt[]; height?: numbe
   const h = hover != null ? data[hover] : null;
   return (
     <div>
-      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px]">
-        <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-4 rounded-full bg-primary" />모델 상위 10% <b className="tabular">{fmtRatio(last.top - 1)}</b></span>
-        <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-4 rounded-full bg-subtle" />시장 전체 평균 <b className="tabular">{fmtRatio(last.all - 1)}</b></span>
+      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]">
+        <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-4 rounded-full bg-ai" />모델 상위 10% <b className="tabular">{fmtRatio(last.top - 1)}</b></span>
+        <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-4 rounded-full bg-muted-foreground" />시장 전체 평균 <b className="tabular">{fmtRatio(last.all - 1)}</b></span>
         {h && <span className="ml-auto text-muted-foreground tabular">{h.t} · 상위 {fmtRatio(h.top - 1)} · 전체 {fmtRatio(h.all - 1)}</span>}
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full touch-none" style={{ height: H }}
@@ -40,13 +43,13 @@ export function EquityChart({ data, height = 180 }: { data: Pt[]; height?: numbe
             <text x={W - PR + 6} y={geo.y(v) + 4} fontSize="11" fill="var(--subtle)">{fmtRatio(v - 1, 0)}</text>
           </g>
         ))}
-        <path d={geo.all} fill="none" stroke="var(--subtle)" strokeWidth="2" strokeLinejoin="round" />
-        <path d={geo.top} fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinejoin="round" />
+        <path d={geo.all} fill="none" stroke="var(--muted-foreground)" strokeWidth="1.6" strokeLinejoin="round" />
+        <path d={geo.top} fill="none" stroke="var(--ai)" strokeWidth="2" strokeLinejoin="round" />
         {hover != null && (
           <g>
             <line x1={geo.x(hover)} x2={geo.x(hover)} y1={PT} y2={H - PB} stroke="var(--faint)" strokeDasharray="3 3" />
-            <circle cx={geo.x(hover)} cy={geo.y(data[hover].top)} r="4" fill="var(--primary)" stroke="var(--card)" strokeWidth="2" />
-            <circle cx={geo.x(hover)} cy={geo.y(data[hover].all)} r="4" fill="var(--subtle)" stroke="var(--card)" strokeWidth="2" />
+            <circle cx={geo.x(hover)} cy={geo.y(data[hover].top)} r="4" fill="var(--ai)" stroke="var(--card)" strokeWidth="2" />
+            <circle cx={geo.x(hover)} cy={geo.y(data[hover].all)} r="4" fill="var(--muted-foreground)" stroke="var(--card)" strokeWidth="2" />
           </g>
         )}
         <text x={PL} y={H - 6} fontSize="11" fill="var(--subtle)">{data[0].t}</text>

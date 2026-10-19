@@ -5,25 +5,29 @@ import { aiKey, loadStaticStocks, MARKETS, newsAi, split, symbolNews, topicNews,
 import { timeAgo } from '@/lib/format';
 import { useNamesVersion, useRelay } from '@/hooks/market';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CARD_TONE, LevelBadge } from '@/components/news/NewsCard';
+import { LevelBadge } from '@/components/news/NewsCard';
 import { medianVotes, relatedOf, sentimentOf, VOTE_NEUTRAL, type Sentiment } from '@/lib/newsTag';
 import { href } from '@/lib/router';
 import { cn } from '@/lib/utils';
 
 export function NewsList({ items, limit = 8 }: { items: { title: string; src: string; url: string; ts: number }[]; limit?: number }) {
   return (
-    <ul className="divide-y divide-border">
+    <ul className="space-y-0.5">
       {items.slice(0, limit).map((x, i) => (
         <li key={i}>
-          <a href={x.url} target="_blank" rel="noopener" className="press -mx-2 block rounded-xl px-2 py-3 hover:bg-hover">
-            <div className="line-clamp-2 text-[14.5px] leading-snug font-semibold break-keep wrap-break-word">{x.title}</div>
-            <div className="mt-1 text-[12px] text-subtle">{x.src} · {timeAgo(x.ts * 1000)}</div>
+          <a href={x.url} target="_blank" rel="noopener" className="press -mx-3 block rounded-[14px] px-3 py-2.5 transition-colors hover:bg-hover">
+            <div className="line-clamp-2 text-[15px] leading-[22px] font-semibold text-foreground wrap-break-word">{x.title}</div>
+            <div className="mt-1 text-[13px] text-muted-foreground">{x.src} · {timeAgo(x.ts * 1000)}</div>
           </a>
         </li>
       ))}
     </ul>
   );
 }
+
+// '미친' 호재·악재만 칸을 물들인다 (뉴스 화면 카드와 같은 비율)
+const HOT_UP = 'bg-[color-mix(in_srgb,var(--up)_var(--hot-a),var(--card))] ring-1 ring-inset ring-up/35';
+const HOT_DOWN = 'bg-[color-mix(in_srgb,var(--down)_var(--hot-a),var(--card))] ring-1 ring-inset ring-down/35';
 
 /** 같은 자산인가 — 코인은 업비트·바이낸스를 같은 코인으로 본다 */
 function sameAsset(a: Sym, b: Sym) {
@@ -70,30 +74,26 @@ function shortReason(s: Sentiment) {
 function FlashList({ rows, coin }: { rows: { x: NewsItem; s: Sentiment }[]; coin: boolean }) {
   return (
     <section className="mb-3" aria-label="코인니스 속보">
-      <div className="mb-1.5 flex items-center justify-between">
+      <div className="mb-1 flex items-center justify-between">
         <h3 className="text-[13px] font-semibold text-muted-foreground">코인니스 속보 · 호재·악재</h3>
-        <a href={href('news', coin ? 'coinflash' : 'stockflash')} className="text-[12.5px] font-semibold text-subtle hover:text-foreground">뉴스에서 보기</a>
+        <a href={href('news', coin ? 'coinflash' : 'stockflash')} className="text-[13px] font-semibold text-muted-foreground hover:text-foreground">뉴스에서 보기</a>
       </div>
-      <ul className="space-y-1.5">
+      <ul className="space-y-1">
         {rows.map(({ x, s }) => {
           const level = s.basis === 'none' ? 0 : s.level;
           const badge = s.basis !== 'none' && (level !== 0 || s.basis === 'ai');
           const why = shortReason(s);
           return (
             <li key={x.id || x.url}>
+              {/* 물들임은 '미친' 단계(±2)만 — 호재·악재는 배지만 */}
               <a href={x.url} target="_blank" rel="noopener"
-                className={cn('press block rounded-xl p-3 hover:shadow-[0_2px_10px_rgba(0,0,0,0.06)]', level === 0 ? 'bg-secondary/70' : CARD_TONE[level])}>
-                <div className="flex items-center gap-1.5">
-                  {badge ? <LevelBadge level={level} className="h-5 px-1.5 text-[11.5px]" /> : null}
-                  <span className={cn('text-[12px] text-subtle tabular', badge && 'ml-auto')}>{timeAgo(x.ts * 1000)}</span>
+                className={cn('press -mx-3 block rounded-[14px] px-3 py-2.5 transition-colors', level === 2 ? HOT_UP : level === -2 ? HOT_DOWN : 'hover:bg-hover')}>
+                {badge ? <LevelBadge level={level} className="mb-1 h-5 px-1.5 text-[12px]" /> : null}
+                <div className="line-clamp-2 text-[15px] leading-[22px] font-semibold text-foreground wrap-break-word">{x.title}</div>
+                <div className="mt-1 flex min-w-0 items-center gap-1 text-[13px] text-muted-foreground">
+                  <span className="shrink-0 tabular">{timeAgo(x.ts * 1000)}</span>
+                  {why ? <><span aria-hidden>·</span>{s.basis === 'ai' ? <Sparkles aria-hidden className="size-3 shrink-0 text-ai" /> : null}<span className="truncate">{why}</span></> : null}
                 </div>
-                <div className="mt-1 line-clamp-2 text-[14px] leading-snug font-semibold break-keep wrap-break-word">{x.title}</div>
-                {why ? (
-                  <div className="mt-1 flex items-center gap-1 text-[12px] text-muted-foreground">
-                    {s.basis === 'ai' ? <Sparkles aria-hidden className="size-3 shrink-0 text-chart-5" /> : null}
-                    <span className="truncate">{why}</span>
-                  </div>
-                ) : null}
               </a>
             </li>
           );
@@ -111,13 +111,13 @@ export function NewsPanel({ sym, market }: { sym: Sym; market: Market }) {
   const flash = useFlashFor(sym, coin);
   const flashList = flash.length ? <FlashList rows={flash} coin={coin} /> : null;
   if (!coin && !ok) return <>{flashList}<p className="py-6 text-center text-[14px] text-muted-foreground">종목 뉴스는 실시간 중계가 연결되면 보여요.</p></>;
-  if (isLoading) return <>{flashList}<div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div></>;
+  if (isLoading) return <>{flashList}<div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12 w-full bg-secondary" />)}</div></>;
   if (isError || !data) return <>{flashList}<p className="py-6 text-center text-[14px] text-muted-foreground">뉴스를 불러오지 못했어요.</p></>;
   if (!data.length) return <>{flashList}<p className="py-6 text-center text-[14px] text-muted-foreground">최근 뉴스가 없어요.</p></>;
   return (
     <>
       {flashList}
-      {data.general && <p className="mb-1 text-[12px] text-subtle">이 코인만의 뉴스가 적어 코인 주요 뉴스를 보여 드려요.</p>}
+      {data.general && <p className="mb-1 text-[13px] text-muted-foreground">이 코인만의 뉴스가 적어 코인 주요 뉴스를 보여 드려요.</p>}
       {flashList ? <h3 className="mt-1 text-[13px] font-semibold text-muted-foreground">기사</h3> : null}
       <NewsList items={data} />
     </>

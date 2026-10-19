@@ -42,13 +42,13 @@ function StatePill({ mode, result }: { mode: Mode; result: Result | null }) {
 function StatusBox({ mode, result, host, action }: { mode: Mode; result: Result | null; host: string | null; action: ReactNode }) {
   const r: Result = (mode === 'off' && result?.kind !== 'info') || !result ? { kind: 'info', msg: mode === 'off' ? OFF_MSG : '아직 확인하지 않았어요' } : result;
   const icon =
-    r.kind === 'busy' ? <Loader2 className="size-[18px] animate-spin text-subtle" />
+    r.kind === 'busy' ? <Loader2 className="size-[18px] animate-spin text-muted-foreground" />
       : r.kind === 'ok' ? <CircleCheck className="size-[18px] text-good" />
-        : r.kind === 'bad' ? <CircleAlert className="size-[18px] text-destructive" />
-          : <Info className="size-[18px] text-subtle" />;
+        : r.kind === 'bad' ? <CircleAlert className="size-[18px] text-warn" />
+          : <Info className="size-[18px] text-muted-foreground" />;
   const where = r.host ?? (mode !== 'off' ? host : null);
   return (
-    <div className="mt-4 rounded-2xl bg-secondary/60 p-4 sm:flex sm:items-center sm:gap-4">
+    <div className="mt-4 rounded-[14px] bg-tile p-4 sm:flex sm:items-center sm:gap-4">
       <div role="status" className="flex min-w-0 flex-1 items-start gap-3">
         <span className="mt-px shrink-0" aria-hidden>{icon}</span>
         <div className="min-w-0 flex-1">
@@ -194,7 +194,7 @@ export function RelayCard() {
                   <Btn onClick={turnOff} disabled={busy || mode === 'off'}><PowerOff className="size-4" />중계 끄기</Btn>
                 </div>
 
-                <div className="rounded-2xl bg-secondary/60 p-4">
+                <div className="rounded-[14px] bg-tile p-4">
                   <div className="text-[14px] font-bold">내 Worker 만들기</div>
                   <ol className="mt-3 space-y-2.5">
                     {STEPS.map((s, i) => (

@@ -7,12 +7,15 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, RotateCw, Search, Star, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { PageProps } from '@/App';
-import { Empty, RowSkeleton } from '@/components/common/Card';
+import { CARD_CLS, Empty, EMPTY_BTN, RowSkeleton } from '@/components/common/Card';
 import { Chip, UnderlineTabs } from '@/components/common/Segmented';
+import { LiveBadge } from '@/components/common/Status';
 import { SymbolLogo } from '@/components/common/SymbolLogo';
 import { CoinExSwitch, VenueBadges } from '@/components/market/CoinVenues';
+import { BreadthCard, WatchRail } from '@/components/market/MarketRail';
 import { MarketRow } from '@/components/market/MarketRow';
 import { GRID, ROW_GRID } from '@/components/market/shared';
+import { useMedia } from '@/components/screener/useMedia';
 import {
   CHIPS, chipOn, chipReversed, clearSpot, isTab, loadSorts, makeRanker, nextHeadSort, peekSpot, restoreSpot, sortOf, sortSyms,
   type Sort, type SortKey, type Tab,
@@ -29,7 +32,7 @@ type Top = 'watch' | 'coin' | 'krx' | 'us';
 const topOf = (t: Tab): Top => (isCoinEx(t) ? 'coin' : t);
 const TAB_NAME: Record<Tab, string> = { upbit: '업비트', binance: '바이낸스', krx: '국내주식', us: '미국주식', watch: '관심 종목' };
 const TOP_ITEMS: { value: Top; label: ReactNode }[] = [
-  { value: 'watch', label: <span className="inline-flex items-center gap-1"><Star className="size-[15px] fill-current text-warn" />관심</span> },
+  { value: 'watch', label: <span className="inline-flex items-center gap-1"><Star aria-hidden strokeWidth={1.4} className="size-[15px] fill-[var(--star)] stroke-[var(--star-edge)]" />관심</span> },
   { value: 'coin', label: '코인' },
   { value: 'krx', label: '국내주식' },
   { value: 'us', label: '미국주식' },
@@ -66,8 +69,8 @@ export default function MarketPage({ args }: PageProps) {
   useEffect(() => {
     Store.set('ml.mkt', tab);
     if (isCoinEx(tab)) saveCoinEx(tab);
-    document.title = `${TAB_NAME[tab]}${isCoinEx(tab) ? ' 코인' : ''} 시세 — 마켓렌즈`;
-    return () => { document.title = '마켓렌즈'; };
+    document.title = `${TAB_NAME[tab]}${isCoinEx(tab) ? ' 코인' : ''} 시세 — 마켓`;
+    return () => { document.title = '마켓'; };
   }, [tab]);
   useEffect(() => { if (isCoinEx(tab)) settleCoinArg('market', args, tab); }, [args, tab]);
 
@@ -197,6 +200,7 @@ export default function MarketPage({ args }: PageProps) {
   }, [empty, tab]);
 
   const stickyTop = useStickyTop();
+  const railOn = useMedia('(min-width: 1240px)'); // 오른쪽 레일 — 넓은 화면에서만 그린다(시세 구독도 그때만)
   // 코인 탭을 누르면 마지막으로 고른 거래소로, 거래소를 바꾸면 그 주소로 (#/market/upbit · #/market/binance)
   const goTop = (t: Top) => { if (t !== top) navigate('market', t === 'coin' ? storedCoinEx() : t); };
   const goEx = (ex: CoinEx) => { if (ex !== tab) { saveCoinEx(ex); navigate('market', ex); } };
@@ -217,8 +221,8 @@ export default function MarketPage({ args }: PageProps) {
   const clearQuery = () => { setQuery(''); setSearchOpen(false); };
 
   const searchField = (mobile: boolean) => (
-    <div className={cn('relative', mobile ? 'w-full' : 'w-64')}>
-      <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-subtle" />
+    <div className={cn('relative', mobile ? 'w-full' : 'w-60')}>
+      <Search className="pointer-events-none absolute top-1/2 left-3 size-[18px] -translate-y-1/2 text-muted-foreground" aria-hidden />
       <input
         type="search" value={query} onChange={(e) => setQuery(e.target.value)} autoFocus={mobile}
         onKeyDown={(e) => {
@@ -226,7 +230,7 @@ export default function MarketPage({ args }: PageProps) {
           else if (e.key === 'Escape') { e.preventDefault(); clearQuery(); (e.target as HTMLInputElement).blur(); }
         }}
         placeholder={`${TAB_NAME[tab]}에서 찾기`} aria-label="목록에서 종목 찾기" enterKeyHint="go" autoComplete="off" spellCheck={false}
-        className="h-10 w-full rounded-xl bg-secondary pr-9 pl-9 text-[16px] text-foreground outline-none placeholder:text-subtle focus-visible:ring-2 focus-visible:ring-ring/40 lg:text-[14px] [&::-webkit-search-cancel-button]:hidden"
+        className="h-10 w-full rounded-xl bg-secondary pr-9 pl-9.5 text-[16px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-[1.5px] focus-visible:ring-foreground focus-visible:ring-inset lg:text-[15px] [&::-webkit-search-cancel-button]:hidden"
       />
       {query && (
         <button type="button" onClick={() => setQuery('')} aria-label="지우기" className="absolute top-1/2 right-2 grid size-6 -translate-y-1/2 place-items-center rounded-full bg-faint/60 text-card">
@@ -236,28 +240,25 @@ export default function MarketPage({ args }: PageProps) {
     </div>
   );
 
-  const meta = (
-    <>
-      {tab !== 'watch' && stats.total > 0 && (
-        <span className="tabular whitespace-nowrap">
-          <span className="text-up-text">상승 {stats.up}</span><span className="mx-1 text-faint">·</span><span className="text-down-text">하락 {stats.down}</span>
-        </span>
-      )}
-      <span className="flex items-center gap-2 whitespace-nowrap">
-        {stats.total > 0 && <span className="tabular">{ranker ? `${rows.length}/${stats.total}` : stats.total}종목</span>}
-        {liveState === 'live' && <span className="inline-flex items-center gap-1"><span className="size-1.5 rounded-full bg-good" />실시간</span>}
-        {liveState === 'closed' && <span>장 마감</span>}
-        {liveState === 'delayed' && <span>지연 시세{stock ? ' · 10분 단위' : ''}</span>}
-      </span>
-    </>
-  );
+  // ── 요약 줄: (상승·하락 수) · n종목 · 시세 상태 — 레일이 보이면 상승·하락 수는 레일에만 ──
+  const breadth = tab !== 'watch' && stats.total > 0 ? (
+    <span className="relative font-semibold whitespace-nowrap tabular">
+      <span className="text-up-text">상승 {stats.up}</span><span className="mx-1 text-faint" aria-hidden>·</span><span className="text-down-text">하락 {stats.down}</span>
+    </span>
+  ) : null;
+  const count = stats.total > 0 ? <span className="whitespace-nowrap tabular">{ranker ? `${rows.length}/${stats.total}` : stats.total}종목</span> : null;
+  const status = liveState === 'live' ? <LiveBadge state="live" />
+    : liveState === 'closed' ? <LiveBadge state="closed" label={tab === 'krx' ? '장 마감 · 15:30 기준' : '장 마감'} />
+      : liveState === 'delayed' ? <LiveBadge state="delayed" label={stock ? '지연 시세 · 10분 단위' : '지연 시세'} /> : null;
+  const metaWide = <div className="hidden shrink-0 items-center gap-2.5 text-[13px] text-muted-foreground md:flex">{!railOn && breadth}{count}{status}</div>;
+  const metaNarrow = <div className="mt-3 flex items-center justify-between gap-3 text-[13px] text-muted-foreground md:hidden">{breadth ?? <span />}{count}{status}</div>;
 
-  const head = (k: SortKey, label: string) => {
+  const head = (k: SortKey, label: string, cls?: string) => {
     const on = sort?.k === k;
     return (
       <button type="button" onClick={() => onHeadSort(k)} aria-label={`${label} 순으로 정렬`}
-        className={cn('inline-flex items-center justify-self-end gap-0.5 whitespace-nowrap transition-colors hover:text-foreground', on && 'font-semibold text-foreground')}>
-        {label}{on && (sort!.d === -1 ? <ArrowDown className="size-3.5" /> : <ArrowUp className="size-3.5" />)}
+        className={cn('inline-flex items-center justify-self-end gap-0.5 whitespace-nowrap transition-colors hover:text-foreground', on && 'text-foreground', cls)}>
+        {label}{on && (sort!.d === -1 ? <ArrowDown className="size-3" strokeWidth={2.4} /> : <ArrowUp className="size-3" strokeWidth={2.4} />)}
       </button>
     );
   };
@@ -266,19 +267,18 @@ export default function MarketPage({ args }: PageProps) {
   let body: ReactNode;
   if (noWatch) {
     body = (
-      <Empty icon={<Star className="size-9" />} action={<a href={href('market', 'coin')} className="press rounded-xl bg-secondary px-4 py-2.5 text-[14px] font-semibold text-secondary-foreground">코인 둘러보기</a>}>
-        <p className="text-[15px] font-semibold text-foreground">관심 종목이 없어요</p>
-        <p className="mt-1">목록에서 ☆를 누르면 여기에 모여요</p>
+      <Empty icon={<Star />} title="관심 종목이 없어요" action={<a href={href('market', 'coin')} className={EMPTY_BTN}>코인 둘러보기</a>}>
+        목록에서 ☆를 누르면 여기에 모여요
       </Empty>
     );
   } else if (empty) {
     const slow = slowTab === tab;
     body = (
-      <div className="px-2 pt-1">
+      <div className="pt-1">
         {slow && (
-          <div className="flex flex-col items-center gap-3 px-6 pt-6 pb-4 text-center text-[14px] break-keep text-muted-foreground">
+          <div className="flex flex-col items-center gap-3 px-6 pt-6 pb-4 text-center text-[14px] text-muted-foreground">
             <p>{stock && stockErr ? `시세를 불러오지 못했어요 (${stockErr.message})` : '시세를 불러오는 데 시간이 걸리고 있어요. 네트워크를 확인해 주세요.'}</p>
-            <button type="button" onClick={() => location.reload()} className="press inline-flex items-center gap-1.5 rounded-xl bg-secondary px-4 py-2 font-semibold text-secondary-foreground">
+            <button type="button" onClick={() => location.reload()} className={EMPTY_BTN}>
               <RotateCw className="size-4" />새로고침
             </button>
           </div>
@@ -290,26 +290,26 @@ export default function MarketPage({ args }: PageProps) {
     const items = (others.data || []).slice(0, 8);
     body = (
       <div className="pb-2">
-        <div className="px-6 pt-8 pb-4 text-center text-[14px] break-keep text-muted-foreground">
+        <div className="px-6 pt-8 pb-4 text-center text-[14px] text-muted-foreground">
           <p className="text-[15px] font-semibold text-foreground">‘{dq}’ — {TAB_NAME[tab]}에는 없어요</p>
           {items.length > 0 && <p className="mt-1">다른 시장에서 찾았어요</p>}
           {!items.length && !others.isFetching && <p className="mt-1">이름이나 코드를 다시 확인해 주세요</p>}
         </div>
         {items.length > 0 && (
-          <ul className="lg:px-2">
+          <ul>
             {items.map((it) => (
               <li key={it.sym}>
-                <a href={href('chart', it.sym)} className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-hover active:bg-secondary/70 lg:rounded-xl lg:px-3">
+                <a href={href('chart', it.sym)} className="-mx-2 flex items-center gap-3 px-2 py-2.5 transition-colors hover:bg-hover active:bg-secondary/70 md:-mx-3 md:rounded-[14px] md:px-3">
                   <SymbolLogo sym={it.sym} size={32} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[15px] font-semibold">{it.name}</span>
                     {MARKETS[it.market].coin ? (
                       // 코인은 한 번만 — 볼 수 있는 거래소를 배지로
-                      <span className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-muted-foreground">
+                      <span className="flex min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground">
                         <span className="truncate">코인 · {it.sub}</span><VenueBadges sym={it.sym} />
                       </span>
                     ) : (
-                      <span className="block truncate text-[12.5px] text-muted-foreground">{MARKETS[it.market].name} · {it.sub}{it.ex ? ` · ${it.ex}` : ''}</span>
+                      <span className="block truncate text-[13px] text-muted-foreground">{MARKETS[it.market].name} · {it.sub}{it.ex ? ` · ${it.ex}` : ''}</span>
                     )}
                   </span>
                 </a>
@@ -336,60 +336,81 @@ export default function MarketPage({ args }: PageProps) {
       : tab === 'watch' ? '★를 다시 누르면 관심 종목에서 빠져요. 관심 종목은 이 기기의 브라우저에만 저장돼요.'
         : `${tab === 'krx' ? '코스피·코스닥' : '나스닥·뉴욕증권거래소'} 시가총액 상위 종목이에요. ${relayOk && !stockErr ? '장중에는 2.5초마다 새로 받아요.' : '실시간 중계가 연결되지 않아 10분마다 바뀌는 지연 시세예요.'}`;
 
-  return (
-    <section className="rounded-[20px] bg-card pb-3 text-card-foreground">
-      {/* 탭 + (PC) 목록 안 찾기 */}
-      <div className="mx-4 flex items-end gap-4 border-b border-border pt-1.5 lg:mx-6 lg:pt-3">
-        <UnderlineTabs items={TOP_ITEMS} value={top} onChange={goTop} className="min-w-0 flex-1 gap-5 lg:gap-6 lg:[&>button]:text-[17px]" />
-        {!noWatch && <div className="mb-2 hidden lg:block">{searchField(false)}</div>}
+  const list = (
+    <section className={cn(CARD_CLS, 'min-w-0 px-4 pt-0.5 pb-3 sm:px-5 md:px-6 md:pt-1.5')}>
+      {/* 탭 + 목록 안 찾기 (PC 입력칸 · 휴대폰 돋보기) */}
+      <div className="flex items-center gap-4 shadow-[inset_0_-1px_0_var(--border)]">
+        <UnderlineTabs size="lg" items={TOP_ITEMS} value={top} onChange={goTop} className="min-w-0 flex-1" />
+        {!noWatch && <div className="hidden lg:block">{searchField(false)}</div>}
+        {!noWatch && (
+          <button
+            type="button" onClick={() => (searchOpen ? clearQuery() : setSearchOpen(true))} aria-label={searchOpen ? '찾기 닫기' : '목록에서 찾기'} aria-expanded={searchOpen}
+            className={cn('press -mr-2.5 grid size-11 shrink-0 place-items-center rounded-xl text-secondary-foreground transition-colors lg:hidden', searchOpen || query ? 'bg-secondary text-foreground' : 'hover:bg-secondary')}
+          >
+            {searchOpen ? <X className="size-5" strokeWidth={1.8} /> : <Search className="size-5" strokeWidth={1.8} />}
+          </button>
+        )}
       </div>
+      {searchOpen && !noWatch && <div className="pt-3 lg:hidden">{searchField(true)}</div>}
 
-      {/* 코인 — 같은 코인을 거래소만 바꿔서 본다 */}
-      {isCoinEx(tab) && <CoinExSwitch value={tab} onChange={goEx} className="px-4 pt-3 lg:px-6 lg:pt-4" />}
-
-      {/* 정렬 칩 + 요약 (관심 종목이 비었으면 감춘다) */}
-      <div className={cn('flex items-center gap-2 pt-3 pr-3 pl-4 lg:px-6', noWatch && 'hidden')}>
-        {/* 휴대폰에선 칩이 넘치면 옆으로 밀린다 — 오른쪽 끝을 흐리게 해서 더 있다는 걸 보여 준다 */}
-        <div className="no-scrollbar -my-1 flex min-w-0 flex-1 gap-1.5 overflow-x-auto py-1 max-lg:pr-6 max-lg:[mask-image:linear-gradient(to_right,black_calc(100%-24px),transparent)]" role="group" aria-label="정렬">
-          {CHIPS[tab].map((c) => {
-            const on = chipOn(c, sort);
-            return (
-              <Chip key={c.id} on={on} onClick={() => setSort(c.sort ? { ...c.sort } : null)}>
-                {c.label}
-                {on && chipReversed(c, sort) && (sort!.d === 1 ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />)}
-              </Chip>
-            );
-          })}
+      {/* 코인 — 같은 코인을 거래소만 바꿔서 본다 (오른쪽엔 요약) */}
+      {coin && (
+        <div className="mt-3.5 flex items-center justify-between gap-3">
+          <CoinExSwitch value={tab} onChange={goEx} className="w-full md:w-auto" />
+          {metaWide}
         </div>
-        <div className="hidden items-center gap-3 text-[13px] text-muted-foreground lg:flex">{meta}</div>
-        <button
-          type="button" onClick={() => (searchOpen ? clearQuery() : setSearchOpen(true))} aria-label={searchOpen ? '찾기 닫기' : '목록에서 찾기'} aria-expanded={searchOpen}
-          className={cn('press grid size-9 shrink-0 place-items-center rounded-xl text-secondary-foreground transition-colors lg:hidden', searchOpen || query ? 'bg-foreground text-background' : 'hover:bg-secondary')}
-        >
-          {searchOpen ? <X className="size-[18px]" /> : <Search className="size-[18px]" />}
-        </button>
-      </div>
-      {searchOpen && !noWatch && <div className="px-4 pt-2.5 lg:hidden">{searchField(true)}</div>}
-      {!noWatch && <div className="flex items-center justify-between gap-3 px-4 pt-3 pb-1 text-[12.5px] text-muted-foreground lg:hidden">{meta}</div>}
+      )}
+      {!noWatch && metaNarrow}
 
-      {/* 목록 */}
-      <div className="mt-1 lg:mt-3 lg:px-2">
+      {/* 정렬 칩 (+ 코인이 아니면 오른쪽에 요약) — 관심 종목이 비었으면 감춘다 */}
+      {!noWatch && (
+        <div className="mt-3 flex items-center gap-3">
+          {/* 휴대폰에선 칩이 넘치면 옆으로 밀린다 — 오른쪽 끝을 흐리게 해서 더 있다는 걸 보여 준다 */}
+          <div className="no-scrollbar -my-1 flex min-w-0 flex-1 gap-2 overflow-x-auto py-1 max-md:-mr-4 max-md:pr-6 max-md:[mask-image:linear-gradient(to_right,black_85%,transparent)]" role="group" aria-label="정렬">
+            {CHIPS[tab].map((c) => {
+              const on = chipOn(c, sort);
+              return (
+                <Chip key={c.id} on={on} onClick={() => setSort(c.sort ? { ...c.sort } : null)}>
+                  {c.label}
+                  {on && chipReversed(c, sort) && (sort!.d === 1 ? <ArrowUp className="-ml-0.5 size-3.5" /> : <ArrowDown className="-ml-0.5 size-3.5" />)}
+                </Chip>
+              );
+            })}
+          </div>
+          {!coin && metaWide}
+        </div>
+      )}
+
+      {/* 목록 — 태블릿·PC 는 표 머리줄이 사이트 머리글 아래에 붙어 따라온다 */}
+      <div className="mt-1.5 md:mt-2">
         {!empty && rows.length > 0 && (
-          <div className={cn(ROW_GRID, GRID[tab], 'sticky z-20 hidden h-10 border-b border-border bg-card px-2 text-[12.5px] text-muted-foreground lg:grid')} style={{ top: stickyTop }}>
+          <div className={cn(ROW_GRID, GRID[tab], 'sticky z-20 -mx-3 hidden h-[34px] bg-card px-3 text-[13px] font-semibold text-muted-foreground md:grid')} style={{ top: stickyTop }}>
             <span className="text-center">#</span>
-            <span className="col-span-2">{head('name', '종목')}</span>
+            <span className="col-span-2">{head('name', '종목', 'justify-self-start')}</span>
             {head('price', '현재가')}
             {head('chg', '등락률')}
-            {head('vol', coin ? '거래대금(24h)' : '거래대금')}
-            {tab === 'upbit' && head('kimp', '김프')}
+            {head('vol', '거래대금', stock ? 'hidden lg:inline-flex' : '')}
+            {tab === 'upbit' && head('kimp', '김프', 'hidden lg:inline-flex')}
             {stock && head('cap', '시가총액')}
             <span />
           </div>
         )}
-        <div className="lg:pt-1">{body}</div>
+        {body}
       </div>
 
-      {note && <p className="mx-4 mt-2 border-t border-border pt-3 text-[12px] leading-relaxed break-keep text-subtle lg:mx-6">{note}</p>}
+      {note && <p className="mt-2 border-t border-border pt-3 text-[12.5px] leading-[1.6] text-muted-foreground">{note}</p>}
     </section>
+  );
+
+  return (
+    <div className="grid items-start gap-2 sm:gap-3 lg:gap-4 min-[1240px]:grid-cols-[minmax(0,1fr)_300px]">
+      {list}
+      {railOn && (
+        <aside className="sticky grid gap-4" style={{ top: stickyTop + 16 }} aria-label="시장 요약">
+          {stats.total > 0 && <BreadthCard up={stats.up} flat={stats.flat} down={stats.down} caption={`${TAB_NAME[tab]} ${stats.total}종목`} />}
+          {tab !== 'watch' && <WatchRail />}
+        </aside>
+      )}
+    </div>
   );
 }

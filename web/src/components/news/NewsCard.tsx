@@ -2,6 +2,7 @@
 // 색만으로 구분하지 않도록 언제나 글자 배지를 붙이고, 판단 근거(AI 이유 · 이용자 투표 · 키워드)를 한 줄로 밝힌다.
 import { memo, useSyncExternalStore } from 'react';
 import { Sparkles } from 'lucide-react';
+import { CARD_CLS } from '@/components/common/Card';
 import { SymbolLogo } from '@/components/common/SymbolLogo';
 import { ChangeText } from '@/components/common/Change';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -53,27 +54,28 @@ export function Meta({ item, className }: { item: NewsItem; className?: string }
   );
 }
 
-// 카드 바탕 — 카드색에 상승·하락 색을 섞는다 (다크 모드에서도 카드색 기준이라 자연스럽다)
+// 카드 바탕 — 호재·악재(±1)는 칠하지 않고 배지만, '미친' 단계(±2)만 카드색에 상승·하락 색을 --hot-a(8%, 다크 10%) 섞는다.
+// 8% 를 넘으면 물든 카드 위 작은 빨강 글자가 4.5:1 아래로 떨어진다. 화면 끝까지 닿는 휴대폰 카드는 테 없이 바탕만
 export const CARD_TONE: Record<Level, string> = {
-  2: 'bg-[color-mix(in_oklab,var(--up)_15%,var(--card))] ring-1 ring-inset ring-up/45',
-  1: 'bg-[color-mix(in_oklab,var(--up)_6.5%,var(--card))]',
+  2: 'bg-[color-mix(in_srgb,var(--up)_var(--hot-a),var(--card))] sm:ring-1 sm:ring-inset sm:ring-up/35',
+  1: 'bg-card',
   0: 'bg-card',
-  [-1]: 'bg-[color-mix(in_oklab,var(--down)_6.5%,var(--card))]',
-  [-2]: 'bg-[color-mix(in_oklab,var(--down)_15%,var(--card))] ring-1 ring-inset ring-down/45',
+  [-1]: 'bg-card',
+  [-2]: 'bg-[color-mix(in_srgb,var(--down)_var(--hot-a),var(--card))] sm:ring-1 sm:ring-inset sm:ring-down/35',
 } as Record<Level, string>;
-// 배지 — '미친' 단계는 꽉 찬 색(흰 글자 대비 4.5:1 이상인 진한 빨강·파랑을 두 테마 모두에 쓴다)
+// 배지 — 호재·악재는 옅은 바탕 + 1px 테, '미친' 단계는 꽉 찬 색(흰 글자 대비 4.5:1 이상인 진한 빨강·파랑을 두 테마 모두에)
 const BADGE_TONE: Record<Level, string> = {
-  2: 'bg-[#e02b3a] text-white',
-  1: 'bg-up-soft text-up-text',
+  2: 'bg-[var(--badge-up)] px-2.5 font-extrabold text-white',
+  1: 'bg-up-soft text-up-text ring-1 ring-inset ring-up/25',
   0: 'bg-secondary text-muted-foreground',
-  [-1]: 'bg-down-soft text-down-text',
-  [-2]: 'bg-[#1b64da] text-white',
+  [-1]: 'bg-down-soft text-down-text ring-1 ring-inset ring-down/25',
+  [-2]: 'bg-[var(--badge-down)] px-2.5 font-extrabold text-white',
 } as Record<Level, string>;
 const BADGE_TEXT: Record<Level, string> = { 2: '🔥 미친 호재', 1: '호재', 0: '중립', [-1]: '악재', [-2]: '💥 미친 악재' } as Record<Level, string>;
 
 export function LevelBadge({ level, className }: { level: Level; className?: string }) {
   return (
-    <span className={cn('inline-flex h-6 shrink-0 items-center rounded-md px-2 text-[12.5px] font-bold whitespace-nowrap', Math.abs(level) === 2 && 'px-2.5 text-[13px] font-extrabold', BADGE_TONE[level], className)}>
+    <span className={cn('inline-flex h-6 shrink-0 items-center rounded-md px-2 text-[12.5px] font-bold whitespace-nowrap', BADGE_TONE[level], className)}>
       {BADGE_TEXT[level]}
     </span>
   );
@@ -83,7 +85,7 @@ export function LevelBadge({ level, className }: { level: Level; className?: str
 export function VoteBar({ bullPct, className }: { bullPct: number; className?: string }) {
   const p = Math.round(Math.min(1, Math.max(0, bullPct)) * 100);
   return (
-    <span aria-hidden className={cn('flex h-1 w-16 shrink-0 overflow-hidden rounded-full bg-down', className)}>
+    <span aria-hidden className={cn('flex h-1 w-14 shrink-0 overflow-hidden rounded-full bg-down', className)}>
       <span className="h-full bg-up" style={{ width: `${p}%` }} />
     </span>
   );
@@ -103,12 +105,12 @@ function VoteLine({ s, sub }: { s: Sentiment; sub?: boolean }) {
       : { text: '표가 더 필요해요', title: '표가 적어 한쪽으로 기운 게 우연일 수 있어요. 표가 더 모이면 판단해요.' };
   }
   return (
-    <p className={cn('flex items-center gap-2 tabular', sub ? 'text-[12.5px] text-muted-foreground' : 'mt-2.5 text-[13.5px] text-secondary-foreground', sub && (s.basis === 'ai' ? 'mt-1' : 'mt-2'))}
+    <p className={cn('flex items-center gap-2.5 text-[13.5px] text-text-3 tabular', sub ? (s.basis === 'ai' ? 'mt-1.5' : 'mt-2') : 'mt-2.5')}
       title={`코인니스 이용자 투표 — 호재 ${bullN}표 · 악재 ${s.votes - bullN}표`}>
       <span className="min-w-0 truncate">
-        투표 <span className={cn('font-semibold', bull ? 'text-up-text' : 'text-down-text')}>{bull ? '호재' : '악재'} {pct}%</span>
+        투표 <span className={cn('font-bold', bull ? 'text-up-text' : 'text-down-text')}>{bull ? '호재' : '악재'} {pct}%</span>
         <span className="text-faint"> · </span>{s.votes.toLocaleString('ko-KR')}명
-        {why ? <><span className="text-faint"> · </span><span className="text-subtle" title={why.title}>{why.text}</span></> : null}
+        {why ? <><span className="text-faint"> · </span><span title={why.title}>{why.text}</span></> : null}
       </span>
       <VoteBar bullPct={s.bullPct} />
     </p>
@@ -128,10 +130,10 @@ export function Reason({ s, aiPending }: { s: Sentiment; aiPending?: boolean }) 
   if (s.basis === 'ai') {
     return (
       <>
-        <p className="mt-2.5 flex items-start gap-1.5 text-[13.5px] leading-[1.5] break-keep wrap-break-word">
-          <Sparkles aria-hidden className="mt-[3px] size-3.5 shrink-0 text-chart-5" />
+        <p className="mt-2.5 flex items-start gap-1.5 text-[14px] leading-[1.5] wrap-break-word">
+          <Sparkles aria-hidden className="mt-[3px] size-3.5 shrink-0 text-ai" />
           <span className="min-w-0">
-            <span className="font-semibold text-foreground">AI 판단</span>
+            <span className="font-bold text-foreground">AI 판단</span>
             <span className="text-faint"> · </span>
             <span className="text-secondary-foreground">{s.reason || `${s.label}${s.level === 0 ? '으로' : '로'} 봤어요`}</span>
           </span>
@@ -144,7 +146,7 @@ export function Reason({ s, aiPending }: { s: Sentiment; aiPending?: boolean }) 
   if (s.basis === 'keywords') {
     const words = [...(s.pos || []).map((w) => ['+', w, 'text-up-text'] as const), ...(s.neg || []).map((w) => ['−', w, 'text-down-text'] as const)].slice(0, 4);
     return (
-      <p className="mt-2.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12.5px] text-subtle" title="AI 판단·투표가 아직 없어 제목·요약의 단어로 추정했어요">
+      <p className="mt-2.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[13px] text-muted-foreground" title="AI 판단·투표가 아직 없어 제목·요약의 단어로 추정했어요">
         <span>키워드로 추정</span>
         {words.map(([sign, w, cls]) => <span key={sign + w} className={cn('font-semibold', cls)}>{sign}{w}</span>)}
         {aiPending ? <><span aria-hidden className="text-faint">·</span><span>AI 판단 전</span></> : null}
@@ -153,7 +155,7 @@ export function Reason({ s, aiPending }: { s: Sentiment; aiPending?: boolean }) 
   }
   if (aiPending) {
     return (
-      <p className="mt-2.5 flex items-center gap-1.5 text-[12.5px] text-subtle" title="AI가 10분쯤마다 새 기사를 판단해요. 판단이 나오면 이 자리에 이유가 보여요.">
+      <p className="mt-2.5 flex items-center gap-1.5 text-[13px] text-muted-foreground" title="AI가 10분쯤마다 새 기사를 판단해요. 판단이 나오면 이 자리에 이유가 보여요.">
         <Sparkles aria-hidden className="size-3.5 shrink-0 text-faint" />AI 판단 전이에요
       </p>
     );
@@ -162,18 +164,19 @@ export function Reason({ s, aiPending }: { s: Sentiment; aiPending?: boolean }) 
 }
 
 /** 관련 종목 칩 — 누르면 차트로. 자기 종목 시세만 구독한다. 이름은 앱이 아는 한글 이름 우선(없으면 기사에 붙은 이름·티커).
- *  바탕은 반투명이라 물든 카드 위에서도 어울린다 */
-export const RelatedChip = memo(function RelatedChip({ sym, name }: Related) {
+ *  물든 카드(onTint) 위에서는 카드색 바탕 — 반투명 칩 위 작은 빨강 글자는 4.5:1 에 못 미친다 */
+export const RelatedChip = memo(function RelatedChip({ sym, name, onTint }: Related & { onTint?: boolean }) {
   useNamesVersion();
   const q = useQuote(sym);
   const code = split(sym)[1], known = nameOf(sym).name;
   const label = shortName(known && known !== code ? known : name || code);
   return (
     <a href={href('chart', sym)} onClick={() => { if (name && known === code) remember(sym, { name }); }}
-      className="press inline-flex h-8 max-w-full items-center gap-1.5 rounded-full bg-foreground/[0.055] pr-3 pl-1 text-[13px] font-semibold text-secondary-foreground hover:bg-foreground/[0.1]">
+      className={cn('press inline-flex h-8 max-w-full items-center gap-1.5 rounded-full pr-3 pl-1 text-[13.5px] font-semibold text-secondary-foreground',
+        onTint ? 'bg-card hover:bg-hover' : 'bg-foreground/[0.06] hover:bg-foreground/[0.1]')}>
       <SymbolLogo sym={sym} size={24} />
       <span className="truncate">{label}</span>
-      {q?.chg != null ? <ChangeText value={q.chg} className="text-[12.5px]" /> : null}
+      {q?.chg != null ? <ChangeText value={q.chg} className="text-[13px] font-semibold" /> : null}
     </a>
   );
 });
@@ -210,23 +213,23 @@ export const NewsCard = memo(function NewsCard({ item, s, related, aiPending }: 
   const badge = !!s && s.basis !== 'none' && (level !== 0 || s.basis === 'ai');
   return (
     <li>
-      <article className={cn('relative rounded-[20px] p-4 transition-shadow hover:shadow-[0_2px_14px_rgba(0,0,0,0.07)] motion-safe:has-[.row-link:active]:scale-[0.99] md:p-5', CARD_TONE[level])}>
-        <div className="flex min-w-0 items-center gap-1.5">
+      <article className={cn(CARD_CLS, 'relative px-4 py-[18px] motion-safe:has-[.row-link:active]:scale-[0.99] sm:p-5 md:px-6', CARD_TONE[level])}>
+        <div className="flex min-h-6 min-w-0 items-center gap-1.5">
           {badge ? <LevelBadge level={level} /> : null}
           {item.important ? <span className="inline-flex h-6 shrink-0 items-center rounded-md bg-foreground px-1.5 text-[12px] font-bold text-background">중요</span> : null}
-          <Meta item={item} className={cn('min-w-0', (badge || item.important) && 'ml-auto pl-2')} />
+          <Meta item={item} className="ml-auto min-w-0 pl-2" />
         </div>
-        <h3 className="mt-2 line-clamp-3 text-[16.5px] leading-[1.45] font-bold tracking-[-0.02em] break-keep wrap-break-word md:text-[17px]">
+        <h3 className="mt-2 line-clamp-3 text-[17px] leading-[25px] font-bold tracking-[-0.02em] wrap-break-word sm:text-[18px] sm:leading-[26px]">
           <a href={item.url} target="_blank" rel="noopener"
-            className="row-link text-foreground outline-none visited:text-muted-foreground after:absolute after:inset-0 after:rounded-[20px] focus-visible:after:ring-2 focus-visible:after:ring-ring">
+            className="row-link text-foreground outline-none visited:text-muted-foreground after:absolute after:inset-0 after:rounded-[inherit] focus-visible:after:ring-2 focus-visible:after:ring-ring">
             {item.title}
           </a>
         </h3>
-        {summary ? <p className="mt-1.5 line-clamp-2 text-[14px] leading-[1.55] text-muted-foreground break-keep wrap-break-word">{summary}</p> : null}
+        {summary ? <p className="mt-1.5 line-clamp-2 text-[14px] leading-[21px] text-text-3 wrap-break-word sm:text-[14.5px] sm:leading-[22px]">{summary}</p> : null}
         {s ? <Reason s={s} aiPending={aiPending} /> : null}
         {related.length ? (
           <div className="relative z-10 mt-3 flex flex-wrap gap-1.5">
-            {related.map((r) => <RelatedChip key={r.sym} sym={r.sym} name={r.name} />)}
+            {related.map((r) => <RelatedChip key={r.sym} sym={r.sym} name={r.name} onTint={Math.abs(level) === 2} />)}
           </div>
         ) : null}
       </article>
@@ -238,11 +241,11 @@ export function CardSkeletons({ rows = 6 }: { rows?: number }) {
   return (
     <ul className="space-y-2" aria-hidden>
       {Array.from({ length: rows }).map((_, i) => (
-        <li key={i} className="rounded-[20px] bg-card p-4 md:p-5">
-          <div className="flex items-center gap-2"><Skeleton className="h-6 w-12" /><Skeleton className="ml-auto h-3.5 w-24" /></div>
-          <Skeleton className="mt-3 h-[18px] w-[92%]" />
-          <Skeleton className={cn('mt-2 h-[18px]', i % 2 ? 'w-[46%]' : 'w-[68%]')} />
-          <Skeleton className="mt-3 h-3.5 w-40" />
+        <li key={i} className={cn(CARD_CLS, 'px-4 py-[18px] sm:p-5 md:px-6')}>
+          <div className="flex items-center gap-2"><Skeleton className="h-6 w-12 bg-secondary" /><Skeleton className="ml-auto h-3.5 w-24 bg-secondary" /></div>
+          <Skeleton className="mt-3 h-[18px] w-[92%] bg-secondary" />
+          <Skeleton className={cn('mt-2 h-[18px] bg-secondary', i % 2 ? 'w-[46%]' : 'w-[68%]')} />
+          <Skeleton className="mt-3 h-3.5 w-40 bg-secondary" />
         </li>
       ))}
     </ul>

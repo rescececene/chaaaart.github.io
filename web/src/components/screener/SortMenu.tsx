@@ -10,8 +10,8 @@ export function SortMenu({ sort, onChange }: { sort: Sort; onChange: (s: Sort) =
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button className="press inline-flex h-9 shrink-0 items-center gap-1 rounded-xl bg-secondary pr-2.5 pl-3 text-[13px] font-semibold text-secondary-foreground">
-          {sortLabel(sort)}<ChevronDown className="size-4 text-muted-foreground" />
+        <button type="button" className="press inline-flex h-[34px] shrink-0 items-center gap-0.5 rounded-full bg-secondary pr-2.5 pl-3.5 text-[14px] font-semibold text-secondary-foreground hover:bg-border/60">
+          {sortLabel(sort)}<ChevronDown className="size-4" aria-hidden />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48 rounded-2xl p-1.5">
@@ -39,9 +39,9 @@ const COLS: { k: SortKey | null; label: string; right?: boolean; hint?: string }
 /** PC 표 머리글 — 누르면 그 열로 정렬, 한 번 더 누르면 방향을 바꾼다. 내려도 사이트 머리글 아래에 붙어 있다 */
 export function SortHeader({ sort, onChange, top }: { sort: Sort; onChange: (s: Sort) => void; top: number }) {
   return (
-    <div style={{ top }} className={cn(WIDE_GRID, 'sticky z-10 -mx-3 border-b border-border bg-card px-3 pt-3 pb-2.5 text-[13px] text-muted-foreground')}>
+    <div style={{ top }} className={cn(WIDE_GRID, 'sticky z-10 -mx-3 h-[34px] bg-card px-3 text-[13px] font-semibold whitespace-nowrap text-muted-foreground')}>
       {COLS.map((c) => {
-        if (!c.k) return <span key={c.label} className="font-medium">{c.label}</span>;
+        if (!c.k) return <span key={c.label}>{c.label}</span>;
         const k = c.k;
         const on = sort.k === k;
         const Icon = sort.d > 0 ? ArrowUp : ArrowDown;
@@ -50,9 +50,9 @@ export function SortHeader({ sort, onChange, top }: { sort: Sort; onChange: (s: 
             key={k} title={c.hint}
             aria-label={`${c.label}${on ? (sort.d > 0 ? ', 오름차순 정렬됨' : ', 내림차순 정렬됨') : '로 정렬'}`}
             onClick={() => onChange({ k, d: on ? (sort.d > 0 ? -1 : 1) : k === 'name' ? 1 : -1 })}
-            className={cn('inline-flex items-center gap-0.5 font-medium whitespace-nowrap transition-colors hover:text-foreground', c.right && 'justify-self-end', on && 'font-semibold text-foreground')}
+            className={cn('inline-flex items-center gap-0.5 whitespace-nowrap transition-colors hover:text-foreground', c.right && 'justify-self-end', k === 'name' && 'col-span-2', on && 'text-foreground')}
           >
-            {c.label}{on && <Icon className="size-3.5" />}
+            {c.label}{on && <Icon className="size-3" strokeWidth={2.4} />}
           </button>
         );
       })}

@@ -103,6 +103,17 @@ jobs:
           path: collector/.history
           key: model-history-${{ github.run_id }}-${{ github.run_attempt }}
 
+      # 전략 탭(분출 임박·돌파…)이 과거에 실제로 통했는지 — 하루 1번 (예측 엔진과 같은 numpy·pandas·scipy 필요, 없으면 설치)
+      - name: 전략 탭 백데이터 검증
+        continue-on-error: true
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          # 20시간 안에 검증했으면 numpy 없이 바로 끝난다. 할 차례인데 numpy 가 없으면 설치하고 다시
+          if python collector/setups.py --stats --if-stale 20; then exit 0; fi
+          python -m pip install --disable-pip-version-check --no-input -r collector/requirements-model.txt
+          python collector/setups.py --stats --if-stale 20
+
       - name: 데이터 저장
         uses: actions/cache/save@v6
         with:
@@ -117,6 +128,8 @@ jobs:
           npm ci --no-audit --no-fund
           npm run build
           cp ../worker/worker.js dist/worker.js
+          # 수집기 내부 상태 파일은 사이트에 올리지 않는다 (공개 정보뿐이지만 사이트가 읽지 않음)
+          rm -f dist/data/coin_social.json dist/data/news_hist.json
 
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5

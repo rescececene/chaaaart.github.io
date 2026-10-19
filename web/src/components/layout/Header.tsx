@@ -10,66 +10,94 @@ import { useRelay, useRelaySaving } from '@/hooks/market';
 import { useResolvedTheme } from '@/lib/theme';
 import { themeStore } from '@/stores';
 import { ChangeText } from '@/components/common/Change';
+import { LiveBadge } from '@/components/common/Status';
 import { SearchCommand } from './SearchCommand';
 
 export const NAV: [PageKey, string][] = [
   ['market', '시장'], ['picks', '유망 종목'], ['chart', '차트'], ['screener', '종목 골라보기'], ['news', '뉴스'],
 ];
+const MAX_W = 'mx-auto max-w-[1248px]';
 
+/** 사이트 이름 — 마크 없이 굵은 글자만 */
 function Logo() {
   return (
-    <a href={href('market')} className="flex shrink-0 items-center gap-2 text-[17px] font-extrabold tracking-tight">
-      <svg viewBox="0 0 28 28" className="size-7" aria-hidden>
-        <rect width="28" height="28" rx="8" className="fill-foreground" />
-        <rect x="6" y="11" width="4" height="10" rx="1.2" fill="var(--up)" />
-        <rect x="12" y="6" width="4" height="13" rx="1.2" fill="var(--down)" />
-        <rect x="18" y="9" width="4" height="9" rx="1.2" fill="var(--up)" />
-      </svg>
-      마켓렌즈
+    <a href={href('market')} aria-label="마켓 — 시장 첫 화면" className="flex h-10 shrink-0 items-center text-[21px] leading-none font-extrabold tracking-[-0.05em] text-foreground">
+      마켓
     </a>
   );
 }
 
-function IconBtn({ label, onClick, hrefTo, children, badge }: { label: string; onClick?: () => void; hrefTo?: string; children: React.ReactNode; badge?: number }) {
-  const cls = 'press relative inline-flex size-10 items-center justify-center rounded-xl text-secondary-foreground hover:bg-secondary';
-  const inner = (
-    <>
-      {children}
-      {badge ? <span className="absolute top-1.5 right-1.5 min-w-4 rounded-full bg-up px-1 text-center text-[10px] leading-4 font-bold text-white">{badge > 9 ? '9+' : badge}</span> : null}
-    </>
-  );
+/** 아이콘 버튼 — 휴대폰 44px, 넓은 화면 40px */
+function IconBtn({ label, onClick, hrefTo, children }: { label: string; onClick?: () => void; hrefTo?: string; children: React.ReactNode }) {
+  const cls = 'press relative inline-flex size-11 items-center justify-center rounded-xl text-secondary-foreground transition-colors hover:bg-secondary md:size-10 [&_svg]:size-[22px]';
   return hrefTo
-    ? <a href={hrefTo} aria-label={label} title={label} className={cls}>{inner}</a>
-    : <button onClick={onClick} aria-label={label} title={label} className={cls}>{inner}</button>;
+    ? <a href={hrefTo} aria-label={label} title={label} className={cls}>{children}</a>
+    : <button type="button" onClick={onClick} aria-label={label} title={label} className={cls}>{children}</button>;
 }
 
+const AI = () => <sup className="top-[-0.6em] ml-[3px] text-[10px] font-extrabold tracking-normal text-ai">AI</sup>;
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/** 지수 띠 — 헤더 밖 회색 바탕 위. '실시간'은 장이 열린 시장이 하나라도 있을 때만, 아니면 'HH:MM 기준' */
 function TickerStrip() {
   const { ok } = useRelay();
   const saving = useRelaySaving();
-  const { data } = useQuery({ queryKey: ['overview', ok], queryFn: overview, refetchInterval: ok ? (saving ? 60_000 : 15_000) : 60_000, staleTime: 10_000 });
-  if (!data?.items.length) return <div className="h-8" />;
+  const { data, dataUpdatedAt } = useQuery({ queryKey: ['overview', ok], queryFn: overview, refetchInterval: ok ? (saving ? 60_000 : 15_000) : 60_000, staleTime: 10_000 });
+  const open = !!data?.live && data.items.some((x) => x.status === 'OPEN');
+  const at = dataUpdatedAt ? new Date(dataUpdatedAt) : null;
   return (
-    <div className="no-scrollbar flex h-8 items-center gap-5 overflow-x-auto text-[12.5px] whitespace-nowrap">
-      {data.items.map((x) => (
-        <span key={x.id} className="inline-flex items-center gap-1.5">
-          <span className="font-medium text-muted-foreground">{x.label}</span>
-          <span className="tabular font-semibold">{fmt(x.price, 2)}</span>
-          <ChangeText value={x.chg} arrowOn={false} className="text-[12px] font-semibold" />
+    <div className={cn(MAX_W, 'flex h-10 items-center sm:px-4 md:h-12 md:px-6')}>
+      <div className="no-scrollbar flex h-full min-w-0 flex-1 items-center gap-[18px] overflow-x-auto px-4 text-[13px] whitespace-nowrap max-sm:[mask-image:linear-gradient(90deg,#000_88%,transparent)] sm:px-1 md:gap-5 md:[mask-image:linear-gradient(90deg,#000_calc(100%-24px),transparent)]">
+        {data?.items.map((x) => (
+          <span key={x.id} className="inline-flex shrink-0 items-baseline gap-1.5">
+            <span className="font-semibold text-secondary-foreground">{x.label}</span>
+            <span className="text-[14px] font-bold text-foreground tabular">{fmt(x.price, 2)}</span>
+            <ChangeText value={x.chg} className="font-semibold" />
+          </span>
+        ))}
+        <span className="w-4 shrink-0" aria-hidden />
+      </div>
+      {/* 기준 시각·상태 — 넓은 화면에서만 오른쪽 끝에 (휴대폰은 목록 위 요약 줄이 알려 준다) */}
+      {data?.items.length ? (
+        <span className="hidden shrink-0 pl-3 text-[12px] text-muted-foreground sm:block">
+          {data.live && saving
+            ? <span title="오래 조작이 없어서 주식 시세를 30초마다 받고 있어요. 화면을 움직이면 바로 실시간으로 돌아와요."><LiveBadge state="delayed" label="절약 모드" className="text-[12px]" /></span>
+            : open ? <LiveBadge state="live" className="text-[12px]" />
+              : at ? <span className="tabular">{pad(at.getHours())}:{pad(at.getMinutes())} 기준</span> : null}
         </span>
-      ))}
-      <span className="inline-flex items-center gap-1 text-muted-foreground">
-        {data.live && saving
-          ? <span title="오래 조작이 없어서 주식 시세를 30초마다 받고 있어요. 화면을 움직이면 바로 실시간으로 돌아와요." className="inline-flex items-center gap-1"><span className="size-1.5 rounded-full bg-faint" />절약 모드</span>
-          : data.live ? <><span className="relative flex size-1.5"><span className="absolute inline-flex size-full animate-ping rounded-full bg-good opacity-60" /><span className="relative inline-flex size-1.5 rounded-full bg-good" /></span>실시간</> : '10분 단위'}
-      </span>
+      ) : null}
     </div>
   );
+}
+
+/** 휴대폰: 아래로 내리면 헤더가 올라가 숨고, 조금이라도 위로 올리면 다시 내려온다 (늘 화면을 가리지 않으면서 메뉴는 가깝게) */
+function useHideOnScroll() {
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => {
+    let last = window.scrollY, raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const y = window.scrollY, dy = y - last;
+        if (y < 120) { setHidden(false); last = y; return; }
+        if (Math.abs(dy) < 8) return;
+        setHidden(dy > 0);
+        last = y;
+      });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => { window.removeEventListener('scroll', onScroll); cancelAnimationFrame(raf); };
+  }, []);
+  return [hidden, setHidden] as const;
 }
 
 export function Header() {
   const route = useRoute();
   const theme = useResolvedTheme();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [hidden, setHidden] = useHideOnScroll();
+  useEffect(() => { setHidden(false); }, [route.page, setHidden]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = e.target instanceof HTMLElement && /input|textarea|select/i.test(e.target.tagName);
@@ -78,43 +106,47 @@ export function Header() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
-  const tabs = (mobile: boolean) => (
-    <nav className={cn('no-scrollbar flex overflow-x-auto', mobile ? 'gap-5 px-4' : 'gap-1')}>
+  const nav = (mobile: boolean) => (
+    <nav aria-label="메뉴" className={cn('no-scrollbar flex overflow-x-auto', mobile ? 'h-11 justify-between px-1.5 min-[380px]:px-2.5' : 'h-16 self-stretch')}>
       {NAV.map(([page, label]) => {
         const on = route.page === page;
-        return mobile ? (
-          <a key={page} href={href(page)} className={cn('relative shrink-0 py-2.5 text-[15px] font-semibold', on ? 'text-foreground' : 'text-subtle')}>
-            {label}
-            {on && <motion.span layoutId="nav-m" className="absolute inset-x-0 bottom-0 h-[2px] rounded-full bg-foreground" transition={{ type: 'spring', stiffness: 520, damping: 40 }} />}
-          </a>
-        ) : (
-          <a key={page} href={href(page)} className={cn('press relative rounded-xl px-3 py-2 text-[15px] font-semibold transition-colors', on ? 'text-foreground' : 'text-subtle hover:text-foreground')}>
-            {on && <motion.span layoutId="nav-d" className="absolute inset-0 rounded-xl bg-secondary" transition={{ type: 'spring', stiffness: 520, damping: 40 }} />}
-            <span className="relative">{label}{page === 'picks' && <span className="ml-1 align-top text-[10px] font-bold text-primary">AI</span>}</span>
+        return (
+          <a key={page} href={href(page)} aria-current={on ? 'page' : undefined}
+            className={cn('relative flex shrink-0 items-center whitespace-nowrap transition-colors',
+              mobile ? 'px-2 text-[14.5px] min-[380px]:px-2.5 min-[380px]:text-[15px]' : 'px-[13px] text-[16px]',
+              on ? 'font-bold text-foreground' : 'font-semibold text-muted-foreground hover:text-secondary-foreground')}>
+            {label}{page === 'picks' && <AI />}
+            {on && <motion.span layoutId={mobile ? 'nav-m' : 'nav-d'} className={cn('absolute bottom-0 h-[2px] rounded-t-[2px] bg-foreground', mobile ? 'inset-x-2 min-[380px]:inset-x-2.5' : 'inset-x-[13px]')} transition={{ type: 'spring', stiffness: 520, damping: 40 }} />}
           </a>
         );
       })}
     </nav>
   );
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-xl backdrop-saturate-150">
-      <div className="mx-auto flex h-14 max-w-[1240px] items-center gap-4 px-4 md:px-6">
-        <Logo />
-        <div className="hidden min-w-0 flex-1 md:block">{tabs(false)}</div>
-        <div className="ml-auto flex items-center gap-0.5 md:ml-0">
-          <button onClick={() => setSearchOpen(true)} className="press mr-1 hidden h-10 w-56 items-center gap-2 rounded-xl bg-secondary px-3 text-[14px] text-subtle lg:flex">
-            <Search className="size-4" /> 종목 검색 <kbd className="ml-auto rounded-md bg-background px-1.5 text-[11px] font-semibold text-muted-foreground">⌘K</kbd>
-          </button>
-          <span className="lg:hidden"><IconBtn label="종목 검색" onClick={() => setSearchOpen(true)}><Search className="size-5" /></IconBtn></span>
-          <IconBtn label={theme === 'dark' ? '밝은 화면' : '어두운 화면'} onClick={() => themeStore.set(theme === 'dark' ? 'light' : 'dark')}>
-            {theme === 'dark' ? <Sun className="size-5" /> : <Moon className="size-5" />}
-          </IconBtn>
-          <IconBtn label="설정" hrefTo={href('settings')}><Settings className="size-5" /></IconBtn>
+    <>
+      <header
+        onFocusCapture={() => setHidden(false)}
+        className={cn('sticky top-0 z-40 bg-background shadow-[0_1px_0_var(--border)] transition-transform duration-200 ease-out motion-reduce:transition-none', hidden && !searchOpen && 'max-md:-translate-y-full')}
+      >
+        <div className={cn(MAX_W, 'flex h-14 items-center gap-2 px-4 md:h-16 md:px-6')}>
+          <Logo />
+          <div className="ml-6 hidden min-w-0 flex-1 self-stretch md:flex">{nav(false)}</div>
+          <div className="-mr-2.5 ml-auto flex items-center md:mr-0 md:ml-0 md:gap-0.5">
+            <button type="button" onClick={() => setSearchOpen(true)} className="press mr-2 hidden h-10 w-[280px] items-center gap-2 rounded-xl bg-secondary pr-2.5 pl-3 text-[15px] text-muted-foreground lg:flex">
+              <Search className="size-[18px]" aria-hidden /> <span className="flex-1 text-left">종목 검색</span>
+              <kbd className="rounded-md bg-background px-[7px] font-sans text-[12px] leading-5 font-semibold text-muted-foreground">/</kbd>
+            </button>
+            <span className="lg:hidden"><IconBtn label="종목 검색" onClick={() => setSearchOpen(true)}><Search strokeWidth={1.8} /></IconBtn></span>
+            <IconBtn label={theme === 'dark' ? '밝은 화면' : '어두운 화면'} onClick={() => themeStore.set(theme === 'dark' ? 'light' : 'dark')}>
+              {theme === 'dark' ? <Sun strokeWidth={1.8} /> : <Moon strokeWidth={1.8} />}
+            </IconBtn>
+            <IconBtn label="설정" hrefTo={href('settings')}><Settings strokeWidth={1.8} /></IconBtn>
+          </div>
         </div>
-      </div>
-      <div className="md:hidden">{tabs(true)}</div>
-      <div className="mx-auto max-w-[1240px] px-4 md:px-6"><TickerStrip /></div>
-      <SearchCommand open={searchOpen} onOpenChange={setSearchOpen} />
-    </header>
+        <div className="md:hidden">{nav(true)}</div>
+        <SearchCommand open={searchOpen} onOpenChange={setSearchOpen} />
+      </header>
+      <TickerStrip />
+    </>
   );
 }

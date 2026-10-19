@@ -3,10 +3,11 @@
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'motion/react';
-import { CloudOff, Hourglass, SearchX } from 'lucide-react';
+import { ChevronDown, CloudOff, Hourglass, SearchX } from 'lucide-react';
 import type { PageProps } from '@/App';
-import { Card, Empty, PageTitle, RowSkeleton } from '@/components/common/Card';
+import { CARD_CLS, Empty, EMPTY_BTN, PageTitle, RowSkeleton } from '@/components/common/Card';
 import { UnderlineTabs } from '@/components/common/Segmented';
+import { LiveBadge } from '@/components/common/Status';
 import { CoinExSwitch } from '@/components/market/CoinVenues';
 import { ScreenerRowItem } from '@/components/screener/ScreenerRow';
 import { SignalChips, SignalHelp } from '@/components/screener/SignalChips';
@@ -26,14 +27,13 @@ let lastView: View | null = null;
 let anchor: { src: string; sym: string; y: number } | null = null;
 type Group = 'coin' | 'krx' | 'us';
 const TABS: { value: Group; label: string }[] = [{ value: 'coin', label: '코인' }, { value: 'krx', label: '국내주식' }, { value: 'us', label: '미국주식' }];
-const textBtn = 'press rounded-xl bg-secondary px-4 py-2 text-[14px] font-semibold text-secondary-foreground';
 
 export default function ScreenerPage({ args }: PageProps) {
   const market = pickMarket(args[0]);
   const coin = MARKETS[market].coin;
   useEffect(() => { Store.set('ml.scrM', market); if (isCoinEx(market)) saveCoinEx(market); }, [market]);
   useEffect(() => { if (isCoinEx(market)) settleCoinArg('screener', args, market); }, [args, market]);
-  useEffect(() => { document.title = `종목 골라보기 · ${coin ? '코인 · ' : ''}${MARKETS[market].name} — 마켓렌즈`; }, [market, coin]);
+  useEffect(() => { document.title = `종목 골라보기 · ${coin ? '코인 · ' : ''}${MARKETS[market].name} — 마켓`; }, [market, coin]);
 
   // 거래소 전체 시세('업비트:*')는 코인 목록이 온 다음에 구독해야 빠짐없이 붙는다
   const [coinsReady, setCoinsReady] = useState(coinsLoaded);
@@ -130,10 +130,13 @@ export default function ScreenerPage({ args }: PageProps) {
   const err = sq.error as HttpError | null;
   const failed = !data && !!err;
 
+  // 실시간 시세가 붙었으면 초록 점(장 마감이면 회색), 아니면 계산 시각만
+  const calc = updated ? <span title={new Date(updated).toLocaleString('ko-KR')}>{timeAgo(updated)} 계산</span> : null;
   const status = updated ? (
-    <div className="flex items-center gap-1.5 pb-0.5 text-[13px] text-muted-foreground">
-      {firstLive && <><span className={closed ? 'size-1.5 rounded-full bg-faint' : 'size-1.5 rounded-full bg-good'} />{closed ? '장 마감' : '실시간 시세'}<span className="text-faint">·</span></>}
-      <span title={new Date(updated).toLocaleString('ko-KR')}>{timeAgo(updated)} 계산</span>
+    <div className="pb-1">
+      {firstLive
+        ? <LiveBadge state={closed ? 'closed' : 'live'} label={<>{closed ? '장 마감' : '실시간 시세'}<span aria-hidden>·</span>{calc}</>} />
+        : <span className="text-[13px] font-semibold text-muted-foreground">{calc}</span>}
     </div>
   ) : null;
 
@@ -143,71 +146,59 @@ export default function ScreenerPage({ args }: PageProps) {
       <>
         {shown.map((e) => <ScreenerRowItem key={e.row.sym} row={e.row} market={market} wide={wide} />)}
         {list.length > shown.length && (
-          <div className="pt-3 pb-1 text-center">
-            <button onClick={() => setView((v) => ({ src, keys: v.src === src ? v.keys : urlChips, all: true }))} className={textBtn}>나머지 {list.length - shown.length}종목 더 보기</button>
-          </div>
+          <button type="button" onClick={() => setView((v) => ({ src, keys: v.src === src ? v.keys : urlChips, all: true }))}
+            className="press -mx-2 mt-1 flex h-12 w-[calc(100%+1rem)] items-center justify-center gap-1 rounded-[14px] text-[14px] font-semibold text-text-3 hover:bg-hover md:-mx-3 md:w-[calc(100%+1.5rem)]">
+            나머지 {list.length - shown.length}종목 더 보기<ChevronDown className="size-4" aria-hidden />
+          </button>
         )}
       </>
     ) : (
-      <Empty icon={<SearchX className="size-9" strokeWidth={1.6} />} action={chips.length ? <button onClick={clearChips} className={textBtn}>조건 선택 해제</button> : undefined}>
-        {chips.length ? <span className="break-keep">고른 조건에 모두 맞는 종목이 없어요<br /><span className="text-[13px] text-subtle">조건을 하나씩 빼 보세요</span></span> : '계산된 종목이 없어요'}
+      <Empty icon={<SearchX />} title={chips.length ? '고른 조건에 모두 맞는 종목이 없어요' : '계산된 종목이 없어요'}
+        action={chips.length ? <button type="button" onClick={clearChips} className={EMPTY_BTN}>조건 선택 해제</button> : undefined}>
+        {chips.length ? '조건을 하나씩 빼 보세요' : null}
       </Empty>
     );
   } else if (err) {
     body = isNoData(err) ? (
-      <Empty icon={<Hourglass className="size-9" strokeWidth={1.6} />}>
-        <span className="break-keep">아직 계산된 데이터가 없어요<br /><span className="text-[13px] text-subtle">첫 수집이 끝나면 10분마다 새로 계산돼요</span></span>
-      </Empty>
+      <Empty icon={<Hourglass />} title="아직 계산된 데이터가 없어요">첫 수집이 끝나면 10분마다 새로 계산돼요</Empty>
     ) : (
-      <Empty icon={<CloudOff className="size-9" strokeWidth={1.6} />} action={<button onClick={() => void sq.refetch()} className={textBtn}>다시 시도</button>}>
-        <span className="break-keep">종목 데이터를 불러오지 못했어요<br /><span className="text-[13px] text-subtle">{errorText(err)}</span></span>
+      <Empty icon={<CloudOff />} title="종목 데이터를 불러오지 못했어요" action={<button type="button" onClick={() => void sq.refetch()} className={EMPTY_BTN}>다시 시도</button>}>
+        {errorText(err)}
       </Empty>
     );
   } else {
-    body = <div className="-mx-2"><RowSkeleton rows={8} /></div>;
+    body = <RowSkeleton rows={8} />;
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2 sm:space-y-3">
       <PageTitle sub="조건을 고르면 딱 맞는 종목만 골라 드려요" right={status}>종목 골라보기</PageTitle>
 
-      <Card className="p-0 md:p-0">
-        <div className="border-b border-border px-5 md:px-6">
-          <UnderlineTabs items={TABS} value={coin ? 'coin' : (market as Group)} onChange={goGroup} />
+      <section className={`${CARD_CLS} px-4 pt-0.5 pb-2 sm:px-5 md:px-6 md:pt-1.5`}>
+        <div className="shadow-[inset_0_-1px_0_var(--border)]">
+          <UnderlineTabs size="lg" items={TABS} value={coin ? 'coin' : (market as Group)} onChange={goGroup} />
         </div>
         {/* 코인 — 거래소만 바꾸고, 고른 조건은 그대로 이어서 본다 */}
-        {isCoinEx(market) && <CoinExSwitch value={market} onChange={goEx} className="px-5 pt-4 md:px-6 md:pt-5" />}
+        {isCoinEx(market) && <CoinExSwitch value={market} onChange={goEx} className="mt-3.5" />}
 
-        <div className="px-5 pt-4 md:px-6 md:pt-5">
-          <div className="mb-2.5 flex items-center justify-between gap-3">
-            <p className="min-w-0 text-[13px] break-keep text-muted-foreground">
-              <span className="font-semibold text-foreground">조건</span><span className="text-faint"> · </span>여러 개 고르면 모두 맞는 종목만 보여요
-            </p>
-            {chips.length > 0 && (
-              <button onClick={clearChips} className="press shrink-0 text-[13px] font-semibold text-muted-foreground hover:text-foreground">선택 해제</button>
-            )}
-          </div>
-          <SignalChips selected={chips} counts={data ? counts : null} onToggle={toggleChip} />
-          <SignalHelp selected={chips} />
+        <SignalChips selected={chips} counts={data ? counts : null} onToggle={toggleChip} />
+        <SignalHelp selected={chips} onClear={clearChips} />
+
+        <div className="mt-[18px] mb-1 flex min-h-[34px] items-center justify-between gap-3">
+          <p className="min-w-0 text-[14px] text-muted-foreground tabular">
+            {data ? (chips.length
+              ? <>{entries.length}종목 중 <b className="text-[15px] font-bold text-foreground">{list.length}종목</b></>
+              : <b className="text-[15px] font-bold text-foreground">{entries.length}종목</b>) : ' '}
+          </p>
+          {!failed && <SortMenu sort={sort} onChange={changeSort} />}
         </div>
+        {wide && !failed && data && list.length > 0 && <SortHeader sort={sort} onChange={changeSort} top={headerH} />}
+        <motion.div key={market} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.16 }} onClick={rememberRow}>
+          {body}
+        </motion.div>
+      </section>
 
-        <div className="px-5 pb-3 md:px-6 md:pb-4">
-          <div className="mt-5 mb-1 flex min-h-9 items-center justify-between gap-3">
-            <p className="min-w-0 text-[14px] text-muted-foreground tabular">
-              {data ? (chips.length
-                ? <>{entries.length}종목 중 <b className="font-bold text-foreground">{list.length}</b>종목</>
-                : <><b className="font-bold text-foreground">{entries.length}</b>종목</>) : ' '}
-            </p>
-            {!wide && !failed && <SortMenu sort={sort} onChange={changeSort} />}
-          </div>
-          {wide && !failed && <SortHeader sort={sort} onChange={changeSort} top={headerH} />}
-          <motion.div key={market} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.16 }} className={wide ? 'pt-1' : undefined} onClick={rememberRow}>
-            {body}
-          </motion.div>
-        </div>
-      </Card>
-
-      <p className="px-1 text-[12.5px] leading-relaxed break-keep text-subtle">
+      <p className="mx-4 text-[12.5px] leading-[1.6] text-muted-foreground sm:mx-1">
         일봉 기준으로 10분마다 다시 계산해요. 가격·등락률·급등/급락은 실시간 시세를 반영하고, 거래량 배수는 오늘 거래량 ÷ 최근 20일 평균이에요.
         조건은 과거 가격 움직임으로 계산한 참고 자료일 뿐, 오르거나 내린다는 보장은 아니에요.
       </p>

@@ -20,8 +20,11 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
+import coin_social
 import indicators
 import news_ai
+import news_hist
+import setups
 import sources
 import stock_ai
 
@@ -92,6 +95,11 @@ def scan(market, snap, limit):
             continue
         if not a:
             continue
+        try:  # 전략 탭(분출 임박·돌파·눌림목…) 판정 — 실패해도 종목은 그대로 싣는다
+            st = setups.detect(cs, market)
+        except Exception as e:
+            st = []
+            print(f"  [{market}] {q['sym']} 전략 탭 실패: {e}")
         if len(out) < stock_ai.TOP_N.get(market, 0):
             try:
                 BRIEFS.append(stock_ai.brief(q["sym"], q["name"], market, q.get("price"), q.get("chg") if q.get("chg") is not None else a["chg"], a))
@@ -107,7 +115,7 @@ def scan(market, snap, limit):
         out.append({"sym": q["sym"], "name": q["name"], "sub": q["sub"], "ex": q.get("ex"),
                     "price": rnd(q["price"]), "chg": rnd(chg, 4), "vol": rnd(q.get("vol"), 4), "cap": rnd(q.get("cap"), 4),
                     "rsi": rnd(a["rsi"], 4), "volRatio": rnd(a["volRatio"], 3), "sig": sig,
-                    "op": a["opinion"]["label"], "score": a["opinion"]["score"]})
+                    "op": a["opinion"]["label"], "score": a["opinion"]["score"], "setups": st})
     print(f"[{market}] {len(out)}종목 계산 / 실패 {fails} / {time.time() - t0:.0f}초")
     return {"market": market, "updatedAt": now_iso(), "count": len(out), "fails": fails, "rows": out}
 
@@ -171,6 +179,10 @@ def news():
             topics.append({"key": key, "label": label, "items": coinness_news(path, link)})
         except Exception as e:
             print(f"[뉴스] {label} 실패: {e}")
+    try:  # 거래소 공지(업비트·빗썸·바이낸스) · 코인 공식 텔레그램 — coin_social.py (30초 안팎, 상태는 data/coin_social.json)
+        topics += coin_social.topics(OUT)
+    except Exception as e:
+        print(f"[뉴스] 거래소 공지·코인 SNS 실패: {e}")
     for key, label, q in NEWS_TOPICS:
         url = "https://news.google.com/rss/search?" + urllib.parse.urlencode(
             {"q": q + " when:1d", "hl": "ko", "gl": "KR", "ceid": "KR:ko"})
@@ -192,7 +204,10 @@ def news():
                 ts = int(parsedate_to_datetime(it.findtext("pubDate")).timestamp())
             except Exception:
                 ts = None
-            items.append({"title": title, "src": src, "url": it.findtext("link"), "ts": ts})
+            link = (it.findtext("link") or "").strip()
+            if not link.startswith(("https://", "http://")):  # 링크는 http(s) 만 (사이트에서 누를 수 있으므로)
+                continue
+            items.append({"title": title, "src": src, "url": link, "ts": ts})
         items.sort(key=lambda x: -(x["ts"] or 0))
         topics.append({"key": key, "label": label, "items": items[:40]})
     return topics
@@ -253,6 +268,11 @@ def main():
             traceback.print_exc()
     for t in threads:
         t.join()
+    if not args.no_news:
+        try:  # 코인별 뉴스 이력 누적 + 사이트용 최근 뉴스 상태 (news_hist.json · news_state.json) — 일봉 파일을 다 쓴 뒤라야 신규 상장 판단이 된다
+            news_hist.run(topics, OUT)
+        except Exception:
+            traceback.print_exc()
     try:  # 시장별 주요 종목 AI 해설 (하루 2번 정도 · 비밀값이 없으면 건너뜀)
         stock_ai.run(BRIEFS, OUT / "stock_ai.json")
     except Exception:

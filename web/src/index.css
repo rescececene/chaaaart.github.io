@@ -31,7 +31,7 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
-  /* 마켓렌즈 전용 — 상승 빨강 · 하락 파랑 (그래픽용 / 글자용 따로), 회색 단계 */
+  /* 마켓 전용 — 상승 빨강 · 하락 파랑 (그래픽용 / 글자용 따로), 회색 단계 */
   --color-up: var(--up);
   --color-down: var(--down);
   --color-up-text: var(--up-text);
@@ -44,6 +44,10 @@
   --color-hover: var(--hover);
   --color-good: var(--good);
   --color-warn: var(--warn);
+  /* AI 표시(보라) · 카드 안 작은 칸 · 본문보다 한 단계 옅은 문장 */
+  --color-ai: var(--ai);
+  --color-tile: var(--tile);
+  --color-text-3: var(--text-3);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -63,13 +67,13 @@
   --card-foreground: #191f28;
   --popover: #ffffff;
   --popover-foreground: #191f28;
-  --primary: #3182f6;         /* 토스 파랑 — 버튼 */
+  --primary: #191f28;         /* 주 버튼·링크 — 먹색 (파랑은 '하락' 뜻이라 쓰지 않는다) */
   --primary-foreground: #ffffff;
   --secondary: #f2f4f6;       /* grey100 — 보조 버튼·칩 */
   --secondary-foreground: #333d4b;
   --muted: #f2f4f6;
-  --muted-foreground: #6b7684; /* grey600 — 보조 글자 (4.9:1) */
-  --subtle: #8b95a1;          /* grey500 — 큰 보조 글자·아이콘 */
+  --muted-foreground: #66707e; /* 보조 글자 — 흰 카드 5.02 · 회색 바탕 4.55 */
+  --subtle: #66707e;          /* = muted (글자에 쓰여 4.5:1 을 지킨다). 더 옅은 회색은 --faint (아이콘·구분점·비활성) */
   --faint: #b0b8c1;           /* grey400 — 비활성 */
   --hover: #f9fafb;           /* grey50 — 행 hover */
   --accent: #f2f4f6;
@@ -77,49 +81,64 @@
   --destructive: #f04452;
   --border: #e5e8eb;          /* grey200 */
   --input: #e5e8eb;
-  --ring: #3182f6;
+  --ring: #191f28;            /* 포커스 링도 먹색 */
   --up: #f04452;              /* 상승 — 캔들·막대 */
   --down: #3182f6;            /* 하락 */
-  --up-text: #e02b3a;         /* 상승 글자 (4.6:1) */
+  --up-text: #d91f30;         /* 상승 글자 — 흰 카드 5.01 · 회색 바탕 4.55 */
   --down-text: #1b64da;       /* 하락 글자 (5.4:1) */
   --up-soft: rgba(240, 68, 82, 0.1);
   --down-soft: rgba(49, 130, 246, 0.1);
   --good: #03b26c;
   --warn: #fe9800;
-  /* 이동평균 4색 — 검증된 범주형 팔레트 순서 (주황·청록·노랑·자홍) */
-  --chart-1: #eb6834;
+  /* 이동평균 4색 — 검증된 범주형 팔레트 (노랑·청록·주황·자홍). MA5 를 노랑으로 해서 빨강 캔들과 섞이지 않게 */
+  --chart-1: #eda100;
   --chart-2: #1baf7a;
-  --chart-3: #eda100;
+  --chart-3: #eb6834;
   --chart-4: #e87ba4;
   --chart-5: #6250d6;         /* RSI */
+  --ai: #6250d6;              /* AI 표시 전용 (= chart-5) — 'AI' 글자, ✦, 예측 범위 띠 */
+  --badge-up: #d91f30;        /* '🔥 미친 호재' 꽉 찬 배지 (흰 글자 5.01:1) */
+  --badge-down: #1b64da;      /* '💥 미친 악재' (흰 글자 5.41:1) */
+  --hot-a: 8%;                /* 미친 호재·악재 카드 물들임 — 넘으면 작은 빨강 글자가 4.5 미만 */
+  --logo-plate: #ffffff;      /* 로고 이미지 뒤 원판 */
+  --tile: #f9fafb;            /* 카드 안 작은 칸 (도움말·요약·범위 상자) */
+  --text-3: #4e5968;          /* 본문보다 한 단계 옅은 문장 (뉴스 요약 · 흰 카드 7.0:1) */
+  --grid: #f2f4f6;            /* 차트 가로 격자 */
+  --seg-on: #ffffff;          /* 세그먼트 손잡이 */
+  --seg-shadow: 0 1px 2px rgba(0, 23, 51, 0.08), 0 2px 6px rgba(0, 23, 51, 0.05);
+  --star: #ffc342;            /* 관심 별 (채움 · 테) */
+  --star-edge: #d39200;
+  --logo-ring: rgba(0, 0, 0, 0.06);
+  /* 로고 실패 이니셜 원 — hsl(티커 색상환, 채도, 밝기) 바탕 / 글자 */
+  --lg-s: 85%; --lg-l: 94%; --lg-ts: 45%; --lg-tl: 34%;
   --radius: 0.875rem;
 }
 
 /* 다크 */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --page: #101013;
-  --background: #17171c;
+  --page: #17171c;
+  --background: #202027;
   --foreground: #ececf0;
-  --card: #1d1d24;
+  --card: #202027;
   --card-foreground: #ececf0;
-  --popover: #24242c;
+  --popover: #2c2c35;
   --popover-foreground: #ececf0;
-  --primary: #4593fc;
-  --primary-foreground: #ffffff;
-  --secondary: #2a2a33;
+  --primary: #f9fafb;         /* 주 버튼 = 흰 알약에 검은 글자 */
+  --primary-foreground: #17171c;
+  --secondary: #2c2c35;
   --secondary-foreground: #d4d4da;
-  --muted: #2a2a33;
+  --muted: #2c2c35;
   --muted-foreground: #9e9ea8;
-  --subtle: #7e7e88;
+  --subtle: #9e9ea8;          /* = muted (카드 위 6.10) */
   --faint: #5a5a64;
-  --hover: #23232b;
-  --accent: #2a2a33;
+  --hover: #26262e;
+  --accent: #2c2c35;
   --accent-foreground: #ececf0;
   --destructive: #f2555f;
   --border: rgba(255, 255, 255, 0.08);
   --input: rgba(255, 255, 255, 0.12);
-  --ring: #4593fc;
+  --ring: #f9fafb;
   --up: #f2555f;
   --down: #4593fc;
   --up-text: #ff6b74;
@@ -128,17 +147,33 @@
   --down-soft: rgba(69, 147, 252, 0.16);
   --good: #20c77d;
   --warn: #ffab2e;
-  --chart-1: #d95926;
+  --chart-1: #c98500;
   --chart-2: #199e70;
-  --chart-3: #c98500;
+  --chart-3: #d95926;
   --chart-4: #d55181;
   --chart-5: #9085e9;
+  --ai: #9085e9;
+  --badge-up: #d91f30;
+  --badge-down: #1b64da;
+  --hot-a: 10%;
+  --logo-plate: #e9ebee;      /* 순백 대신 — 투명 로고(ETH)가 묻히지 않고 덜 튀게 */
+  --tile: #2c2c35;
+  --text-3: #c3c3c6;
+  --grid: #27272f;
+  --seg-on: #3c3c47;
+  --seg-shadow: none;
+  --star: #ffd158;
+  --star-edge: #ffd158;
+  --logo-ring: rgba(255, 255, 255, 0.06);
+  --lg-s: 30%; --lg-l: 24%; --lg-ts: 80%; --lg-tl: 78%;
 }
 
 @layer base {
   * { @apply border-border outline-ring/50; }
   html { @apply font-sans; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
-  body { @apply bg-page text-foreground antialiased; font-size: 15px; letter-spacing: -0.01em; min-height: 100dvh; }
+  body { @apply bg-page text-foreground antialiased; font-size: 15px; letter-spacing: -0.01em; min-height: 100dvh; word-break: keep-all; overflow-wrap: break-word; }
+  /* 글자 라벨로 쓰는 i/em 이 기울지 않게 */
+  i, em { font-style: normal; }
   button:not(:disabled), [role="button"]:not(:disabled) { cursor: pointer; }
   .tabular { font-variant-numeric: tabular-nums; }
 }
@@ -146,17 +181,25 @@
 @layer utilities {
   .no-scrollbar { scrollbar-width: none; }
   .no-scrollbar::-webkit-scrollbar { display: none; }
-  /* 가격이 바뀔 때 잠깐 배경이 물드는 효과 */
-  .flash-up { animation: flash-up 0.8s ease-out; }
-  .flash-down { animation: flash-down 0.8s ease-out; }
+  /* 가격이 바뀔 때 잠깐 배경이 물드는 효과 — 0.5초 안에 완전히 사라진다 */
+  .flash-up { animation: flash-up 0.5s ease-out; }
+  .flash-down { animation: flash-down 0.5s ease-out; }
+  /* 큰 가격은 바탕 대신 글자 색만 잠깐 진하게 (분홍 상자가 남지 않게) */
+  .pulse-up { animation: pulse-up 0.4s ease-out; }
+  .pulse-down { animation: pulse-down 0.4s ease-out; }
+  /* 실시간 점 — 2초 숨쉬기 고리 */
+  .live-dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent); animation: live-breathe 2s ease-in-out infinite; }
   /* 누를 때 살짝 들어가는 토스식 반응 */
   .press { transition: transform 0.12s ease, background-color 0.15s ease; }
   .press:active { transform: scale(0.98); }
 }
 @keyframes flash-up { from { background-color: var(--up-soft); } to { background-color: transparent; } }
 @keyframes flash-down { from { background-color: var(--down-soft); } to { background-color: transparent; } }
+@keyframes pulse-up { from { color: var(--up-text); } }
+@keyframes pulse-down { from { color: var(--down-text); } }
+@keyframes live-breathe { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--good) 8%, transparent); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .flash-up, .flash-down { animation: none; }
+  .flash-up, .flash-down, .pulse-up, .pulse-down, .live-dot { animation: none; }
   .press:active { transform: none; }
 }

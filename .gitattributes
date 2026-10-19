@@ -1,0 +1,4 @@
+# 줄바꿈은 LF 로 통일 (Windows 에서 고쳐도 저장소에는 LF)
+* text=auto eol=lf
+*.png binary
+*.svg text eol=lf

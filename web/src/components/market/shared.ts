@@ -6,16 +6,18 @@ import { nameOf, type Market, type Sym } from '@/lib/market';
 import { toggleWatch, watchStore } from '@/stores';
 import type { Tab } from './sort';
 
-/** 열 너비 — 머리줄과 행이 같은 값을 쓴다 (lg 이상에서만 표, 그 아래는 두 줄 행) */
+/** 열 너비 — 머리줄과 행이 같은 값을 쓴다.
+ *  휴대폰(<768): 두 줄 행 · 태블릿(md): 순위·로고·이름·현재가·등락률·(거래대금|시가총액)·별 · PC(lg): 김프·시가총액 열까지 */
+const MD = 'md:grid-cols-[28px_40px_minmax(0,1fr)_140px_96px_100px_36px]';
 export const GRID: Record<Tab, string> = {
-  upbit: 'lg:grid-cols-[40px_36px_minmax(0,1fr)_160px_112px_112px_96px_44px]',
-  binance: 'lg:grid-cols-[40px_36px_minmax(0,1fr)_160px_112px_128px_44px]',
-  krx: 'lg:grid-cols-[40px_36px_minmax(0,1fr)_160px_112px_112px_120px_44px]',
-  us: 'lg:grid-cols-[40px_36px_minmax(0,1fr)_160px_112px_112px_120px_44px]',
-  watch: 'lg:grid-cols-[40px_36px_minmax(0,1fr)_160px_112px_128px_44px]',
+  upbit: `${MD} lg:grid-cols-[28px_40px_minmax(0,1fr)_150px_96px_96px_80px_36px]`,
+  binance: `${MD} lg:grid-cols-[28px_40px_minmax(0,1fr)_150px_96px_112px_36px]`,
+  krx: `${MD} lg:grid-cols-[28px_40px_minmax(0,1fr)_150px_96px_96px_120px_36px]`,
+  us: `${MD} lg:grid-cols-[28px_40px_minmax(0,1fr)_150px_96px_96px_120px_36px]`,
+  watch: `${MD} lg:grid-cols-[28px_40px_minmax(0,1fr)_150px_96px_112px_36px]`,
 };
-/** display 는 쓰는 쪽에서 정한다 (머리줄은 PC 에서만 보이므로 hidden lg:grid) */
-export const ROW_GRID = 'grid-cols-[18px_36px_minmax(0,1fr)_auto_32px] items-center gap-x-2 lg:gap-x-3';
+/** display 는 쓰는 쪽에서 정한다 (머리줄은 md 이상에서만 보이므로 hidden md:grid) */
+export const ROW_GRID = 'grid-cols-[18px_36px_minmax(0,1fr)_auto_32px] items-center gap-x-2 min-[390px]:grid-cols-[20px_36px_minmax(0,1fr)_auto_32px] min-[390px]:gap-x-2.5 md:gap-x-3';
 
 const EX: Record<string, string> = { KOSPI: '코스피', KOSDAQ: '코스닥', KONEX: '코넥스', NASDAQ: '나스닥', NYSE: 'NYSE', AMEX: 'AMEX' };
 export const exLabel = (ex?: string) => (ex ? EX[ex.toUpperCase()] || ex : '');

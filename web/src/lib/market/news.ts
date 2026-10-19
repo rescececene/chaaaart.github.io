@@ -7,10 +7,20 @@ import { staticJSON } from './staticData';
 import type { NewsAi, NewsItem, Sym } from './types';
 
 export interface NewsTopic { key: string; label: string; items: NewsItem[] }
-export const topicNews = () => staticJSON<{ updatedAt: string; topics: NewsTopic[] }>('news.json', 5 * 60e3);
+/** 바깥으로 여는 링크는 http(s) 만 — 수집한 글에 javascript: 같은 주소가 섞여 와도 누를 수 없게 */
+export const safeUrl = (u: string | null | undefined): string => {
+  try { const x = new URL(String(u || '')); return x.protocol === 'https:' || x.protocol === 'http:' ? x.href : '#'; } catch { return '#'; }
+};
+const cleanItems = <T extends { url: string }>(xs: T[]): T[] => xs.map((x) => ({ ...x, url: safeUrl(x.url) }));
+export const topicNews = () => staticJSON<{ updatedAt: string; topics: NewsTopic[] }>('news.json', 5 * 60e3)
+  .then((d) => ({ ...d, topics: (d.topics || []).map((tp) => ({ ...tp, items: cleanItems(tp.items || []) })) }));
 /** 코인·주식 속보의 AI 호재·악재 판단 — GitHub Actions 가 10분마다 Cloudflare Workers AI 로 만든다 (해외 속보는 판단하지 않는다).
  *  중계를 거치지 않는 정적 파일이라 중계 요청 수와 상관없다. 키: '<주제>:<기사 id>' */
 export const newsAi = () => staticJSON<NewsAi>('news_ai.json', 2 * 60e3);
+/** 코인별 최근 뉴스 상태 + 과거 검증(collector/news_hist.py) — 뉴스는 기대 수익률에 섞지 않고 참고로만.
+ *  study.groups.krListNew: '업비트 신규 상장' 뒤엔 과거에 대체로 내렸다 (주의 표시용) */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const newsState = () => staticJSON<any>('news_state.json', 5 * 60e3);
 export const aiKey = (topic: string, it: NewsItem) => (it.id ? `${topic}:${it.id}` : '');
 
 const unescapeHtml = (s: string) => { const t = document.createElement('textarea'); t.innerHTML = s || ''; return t.value; };
@@ -44,7 +54,7 @@ async function symbolNewsRaw(sym: Sym): Promise<SymbolNews> {
 }
 export async function symbolNews(sym: Sym): Promise<SymbolNews> {
   const seen = new Set<string>(), raw = await symbolNewsRaw(sym);
-  const out: SymbolNews = raw.filter((x) => x.title && !seen.has(x.title) && seen.add(x.title)); // 같은 제목은 하나만
+  const out: SymbolNews = cleanItems(raw.filter((x) => x.title && !seen.has(x.title) && seen.add(x.title))); // 같은 제목은 하나만
   out.general = raw.general;
   return out;
 }
@@ -77,9 +87,9 @@ export async function coinnessLive(kind: keyof typeof COINNESS): Promise<NewsIte
 }
 /** 실시간으로 다시 받을 수 있는 뉴스 주제 (나머지는 GitHub Actions 10분 주기) */
 export const LIVE_TOPICS: Record<string, () => Promise<NewsItem[]>> = {
-  world: worldNewsLive,
-  coinflash: () => coinnessLive('coinflash'),
-  stockflash: () => coinnessLive('stockflash'),
+  world: () => worldNewsLive().then(cleanItems),
+  coinflash: () => coinnessLive('coinflash').then(cleanItems),
+  stockflash: () => coinnessLive('stockflash').then(cleanItems),
 };
 export const googleNewsUrl = (query: string) => 'https://news.google.com/search?' + new URLSearchParams({ q: query, hl: 'ko', gl: 'KR', ceid: 'KR:ko' });
 export function newsMoreUrl(sym: Sym) {

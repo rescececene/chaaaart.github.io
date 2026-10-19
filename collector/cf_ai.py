@@ -10,6 +10,7 @@
 """
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -19,6 +20,11 @@ MODEL = os.environ.get("CF_AI_MODEL") or "@cf/google/gemma-4-26b-a4b-it"  # 다�
 API = os.environ.get("CF_API_BASE") or "https://api.cloudflare.com/client/v4"
 DAILY_NEURONS = 8000  # 무료 한도(10,000) 전에 멈춘다
 N_IN, N_OUT = 9091, 27273  # Gemma 4 26B 단가 — 토큰 100만 개당 뉴런 (입력, 출력)
+
+
+def scrub(text):
+    """사이트(공개 파일)·공개 로그에 남는 오류 글에서 계정 ID·토큰처럼 보이는 긴 문자열을 가린다"""
+    return re.sub(r"[A-Za-z0-9_\-]{32,}", "…", re.sub(r"[0-9a-fA-F]{20,}", "…", str(text)))
 
 
 class Stop(Exception):
@@ -87,11 +93,11 @@ def chat(system, user, max_tokens, temperature=0.1, timeout=60):
         with urllib.request.urlopen(req, timeout=timeout) as r:
             d = json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        raise Stop(f"HTTP {e.code} {e.read().decode('utf-8', 'replace')[:300]}") from None
+        raise Stop(scrub(f"HTTP {e.code} {e.read().decode('utf-8', 'replace')[:300]}")) from None
     except (urllib.error.URLError, TimeoutError) as e:
-        raise Stop(f"연결 실패 {e}") from None
+        raise Stop(scrub(f"연결 실패 {e}")) from None
     if not d.get("success", True):
-        raise Stop(f"실패 {json.dumps(d.get('errors'), ensure_ascii=False)[:300]}")
+        raise Stop(scrub(f"실패 {json.dumps(d.get('errors'), ensure_ascii=False)[:300]}"))
     res = d.get("result") or {}
     u = res.get("usage") or {}
     tin = u.get("prompt_tokens") or (len(system) + len(user)) / 1.5

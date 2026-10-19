@@ -24,7 +24,9 @@ TIME_BUDGET = 120  # 한 번 실행에 AI 로 쓰는 최대 초 (수집 전체�
 KEEP = 1500  # 기억해 둘 판단 수
 # 판단할 뉴스 주제 (적힌 순서대로) → (프롬프트에 쓰는 이름, 한 번에 볼 최신 기사 수)
 # 코인니스 속보만 (하루 170~190건씩 → 약 1,300 뉴런). 해외 속보는 AI 로 판단하지 않는다.
-FEEDS = {"coinflash": ("코인", 30), "stockflash": ("주식", 30)}
+FEEDS = {"coinflash": ("코인", 30), "stockflash": ("주식", 30),
+         "notice": ("거래소 공지", 20),  # coin_social.py — 규칙 1차 판단(rule)이 붙어 있어 AI 는 확인만 (하루 20건 안팎)
+         "social": ("코인 SNS", 20)}  # coin_social.py — 코인 공식 텔레그램 채널 글 (하루 수십 건)
 
 SYSTEM = """너는 한국 개인 투자자를 위한 금융 속보 분석가다. 기사마다 관련 자산 가격에 줄 단기 영향을 판단한다.
 s (영향 점수):
@@ -38,6 +40,11 @@ s (영향 점수):
 - 이미 일어난 가격 움직임만 전하는 기사는 신고가·급등락처럼 두드러질 때만 ±1, 아니면 0.
 - r: 판단 이유를 한국어로 짧게 (20자 안팎).
 - t: 직접 영향을 받는 코인 티커(BTC, ETH 등)나 종목(미국은 티커, 한국은 회사 이름) 최대 3개. 없으면 빈 배열.
+- '거래소 공지'는 거래소가 직접 올린 공지다. [규칙 판단]이 붙어 있으면 그 점수를 그대로 쓰고, 본문이 분명히 다를 때만 바꾼다.
+  과거 데이터상 신규 상장은 직후 오른 뒤 7일 안에 내린 경우가 많아 0, 거래지원 종료·유의 종목 지정은 -1 이다 (±2 로 올리지 않는다).
+  입출금 중단은 사유가 해킹·체인 정지면 -1(대형 해킹이면 -2), 정기 업그레이드·점검이면 0.
+- '코인 SNS'는 코인 프로젝트 공식 텔레그램 채널 글이다(영어가 많다). 홍보·이벤트·AMA·단순 안내는 0.
+  메인넷 출시·대형 제휴·바이백·소각·거래소 상장·해킹 같은 실질 소식만 ±1, 아주 큰 것만 ±2. r 은 한국어로.
 - 입력 기사 순서대로 모두 답한다. JSON 배열만 출력한다.
 출력 예: [{"i":0,"s":1,"r":"현물 ETF 자금 유입","t":["BTC"]},{"i":1,"s":0,"r":"일정 안내","t":[]}]"""
 
@@ -83,7 +90,8 @@ def parse(text, n):
 def ask(kind, items):
     """기사 묶음 하나를 묻는다 → ({i: 판단}, 쓴 뉴런 어림값)"""
     user = f"{kind} 속보 {len(items)}건\n\n" + "\n\n".join(
-        f"[{i}] {x['title']}" + (f"\n{x['body']}" if x["body"] else "") for i, x in enumerate(items))
+        f"[{i}] " + (f"({x['src']}) " if x.get("src") else "") + x["title"] + (f"\n{x['body']}" if x["body"] else "")
+        + (f"\n[규칙 판단] {x['rule']['s']:+d} {x['rule']['r']}" if x.get("rule") else "") for i, x in enumerate(items))
     text, neurons = cf_ai.chat(SYSTEM, user, max_tokens=80 * len(items) + 120)
     try:
         return parse(text, len(items)), neurons
@@ -110,7 +118,9 @@ def run(topics, path, usage_path=None):
                 if time.time() - t0 > TIME_BUDGET:
                     raise cf_ai.Stop("이번 실행 시간 초과 — 다음 실행에 이어서")
                 batch = todo[i:i + BATCH]
-                got, neurons = ask(kind, [{"title": clip(x.get("title"), 120), "body": clip(x.get("summary"), 300)} for x in batch])
+                got, neurons = ask(kind, [{"title": clip(x.get("title"), 120), "body": clip(x.get("summary"), 300),
+                                           "src": x.get("src") if key == "social" else "",  # 어느 코인 채널 글인지
+                                           "rule": x.get("rule") if isinstance(x.get("rule"), dict) else None} for x in batch])
                 budget.add("news", neurons)
                 asked += len(batch)
                 for j, x in enumerate(batch):
@@ -128,7 +138,7 @@ def run(topics, path, usage_path=None):
         del tags[k]
     out = {"updatedAt": now_iso(), "model": cf_ai.MODEL, "usage": budget.snapshot(), "tags": tags}
     if err:
-        out["error"] = err[:300]
+        out["error"] = cf_ai.scrub(err)[:300]
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")

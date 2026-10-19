@@ -44,6 +44,11 @@ export interface NewsItem {
   bull?: number | null; bear?: number | null; important?: boolean; // 코인니스 속보: 호재·악재 투표, 중요 표시
   codes?: string[]; // 코인니스가 붙인 관련 코인 티커 (BTC, ETH …)
   rel?: { sym: string; name: string }[]; // 네이버가 붙인 관련 종목
+  // 거래소 공지(notice) · 코인 SNS(social) — collector/coin_social.py
+  rule?: { s: -2 | -1 | 0 | 1 | 2; r: string }; // 규칙 1차 판단 (AI 판단이 없을 때 쓴다)
+  caution?: 'listing' | 'delist' | 'warning'; // 상장(과거엔 직후 하락 잦음) · 거래지원 종료 · 유의/경고
+  cat?: string; // 거래소 분류
+  ch?: string; verified?: boolean; via?: string; // SNS: 채널 @아이디 · 텔레그램 인증 · 다른 곳 글을 옮긴 경우 (예: X)
 }
 /** AI 호재·악재 판단 — s: 2 미친 호재 · 1 호재 · 0 중립 · -1 악재 · -2 미친 악재, r: 이유, t: 관련 티커·종목 이름 */
 export interface AiTag { s: -2 | -1 | 0 | 1 | 2; r: string; t: string[]; at?: number }
@@ -54,6 +59,8 @@ export interface ScreenerRow {
   sym: Sym; name: string; sub: string; ex?: string | null;
   price: number | null; chg: number | null; vol: number | null; cap: number | null;
   rsi: number | null; volRatio: number | null; sig: string[]; op: string; score: number;
+  /** 전략 탭 판정 (collector/setups.py) — 켜진 것만 점수 순: k 키, s 0~100, r 근거 */
+  setups?: { k: string; s: number; r: string[] }[];
 }
 export interface ScreenerData { market: Market; updatedAt: string; count: number; fails: number; rows: ScreenerRow[] }
 

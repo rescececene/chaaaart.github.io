@@ -195,7 +195,7 @@ def run(briefs, path, usage_path=None, force=False):
             items[sym] = v
     out = {"updatedAt": now_iso(), "model": cf_ai.MODEL, "usage": budget.snapshot(), "items": items}
     if err:
-        out["error"] = err[:300]
+        out["error"] = cf_ai.scrub(err)[:300]
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")

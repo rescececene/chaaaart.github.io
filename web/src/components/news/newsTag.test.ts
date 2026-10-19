@@ -38,17 +38,18 @@ describe('sentimentOf', () => {
     expect(s.votes).toBe(410); // 투표는 참고로 함께
   });
   it('AI 가 판단에 실패(null)했으면 투표로', () => {
-    const s = sentimentOf(item({ bull: 200, bear: 20 }), 150, null, VOTE_NEUTRAL.coinflash);
+    const s = sentimentOf(item({ bull: 270, bear: 20 }), 150, null, VOTE_NEUTRAL.coinflash);
     expect(s.basis).toBe('votes');
     expect(s.level).toBe(1);
   });
-  it('코인 속보 투표 — 뚜렷한 호재·악재만, 반반이면 중립', () => {
+  it('코인 속보 투표 — 보통 기사도 호재 표가 84~92% 라서 그 위·아래 꼬리만 호재·악재', () => {
     const med = 180, n = VOTE_NEUTRAL.coinflash;
-    expect(sentimentOf(item({ bull: 99, bear: 33 }), med, undefined, n).level).toBe(1);
-    expect(sentimentOf(item({ bull: 104, bear: 94 }), med, undefined, n).level).toBe(0);
+    expect(sentimentOf(item({ bull: 190, bear: 10 }), med, undefined, n).level).toBe(1); // 95%
+    expect(sentimentOf(item({ bull: 170, bear: 30 }), med, undefined, n).level).toBe(0); // 85% — 보통 기사
+    expect(sentimentOf(item({ bull: 99, bear: 33 }), med, undefined, n).level).toBe(0); // 75% — 아직 보통 범위
     expect(sentimentOf(item({ bull: 51, bear: 93 }), med, undefined, n).level).toBe(-1);
     // 중요 표시 + 압도적 호재 → 미친 호재
-    expect(sentimentOf(item({ bull: 444, bear: 54, important: true }), med, undefined, n).level).toBe(2);
+    expect(sentimentOf(item({ bull: 480, bear: 15, important: true }), med, undefined, n).level).toBe(2);
     // 표가 적으면 투표로 판단하지 않는다
     expect(sentimentOf(item({ title: '일정 안내', bull: 9, bear: 1 }), med, undefined, n).basis).toBe('none');
   });

@@ -10,5 +10,5 @@ export { isIdle, onIdleChange } from './activity';
 export { candles, INTERVALS, IV_SEC, DAILY, IV_LABEL, IV_UNIT, safeCode } from './candles';
 export { overview, FX, usdtKrw, kimp, refreshKimpRef } from './overview';
 export { search } from './search';
-export { topicNews, symbolNews, worldNewsLive, coinnessLive, LIVE_TOPICS, newsMoreUrl, googleNewsUrl, newsAi, aiKey, type NewsTopic, type SymbolNews } from './news';
+export { topicNews, symbolNews, worldNewsLive, coinnessLive, LIVE_TOPICS, newsMoreUrl, googleNewsUrl, newsAi, newsState, aiKey, safeUrl, type NewsTopic, type SymbolNews } from './news';
 export * from './screener';

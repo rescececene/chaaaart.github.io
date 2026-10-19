@@ -6,8 +6,9 @@ import { useQuery } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import { ArrowUpRight, Newspaper, Sparkles } from 'lucide-react';
 import type { PageProps } from '@/App';
-import { Empty, PageTitle } from '@/components/common/Card';
+import { CARD_CLS, Empty, EMPTY_BTN, PageTitle } from '@/components/common/Card';
 import { Chip } from '@/components/common/Segmented';
+import { LiveBadge } from '@/components/common/Status';
 import { CardSkeletons, clockLabel, NewsCard } from '@/components/news/NewsCard';
 import { countMentions, LatestElsewhere, MentionStrip, TopicTabs, TopMentions, uniqItems } from '@/components/news/NewsFeed';
 import { useInterval, useNamesVersion, useRelay, useWant } from '@/hooks/market';
@@ -48,20 +49,12 @@ type Filter = 'all' | 'bull' | 'bear';
 interface Row { x: NewsItem; s: Sentiment | null; related: Related[] }
 const levelOf = (r: Row) => (r.s && r.s.basis !== 'none' ? r.s.level : 0);
 
-function LiveDot() {
-  return (
-    <span className="relative mr-1 inline-flex size-1.5 align-middle">
-      <span className="absolute inline-flex size-full animate-ping rounded-full bg-good opacity-60" />
-      <span className="relative inline-flex size-1.5 rounded-full bg-good" />
-    </span>
-  );
-}
-
+/** 회색 바탕 위 보조 버튼 — 카드색 바탕 */
 function GoogleEconLink() {
   return (
     <a href={GOOGLE_ECON} target="_blank" rel="noopener"
-      className="press inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-card px-3 text-[13.5px] font-semibold text-foreground hover:bg-hover">
-      <Newspaper className="size-4 text-muted-foreground" />구글 뉴스 경제<ArrowUpRight className="size-3.5 text-subtle" />
+      className="press inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-card px-3 text-[14px] font-semibold text-secondary-foreground hover:bg-hover">
+      구글 뉴스 경제<ArrowUpRight className="size-4 text-muted-foreground" aria-hidden />
     </a>
   );
 }
@@ -140,13 +133,13 @@ export default function NewsPage({ args }: PageProps) {
   const more = moreLink(key, label);
   const pick = (k: string) => navigate('news', k);
   useEffect(() => { if (topics || FIRST.some((t) => t.key === key)) Store.set('ml.newsT', key); }, [topics, key]);
-  useEffect(() => { document.title = label ? `뉴스 · ${label} — 마켓렌즈` : '뉴스 — 마켓렌즈'; }, [label]);
-  useEffect(() => () => { document.title = '마켓렌즈'; }, []);
+  useEffect(() => { document.title = label ? `뉴스 · ${label} — 마켓` : '뉴스 — 마켓'; }, [label]);
+  useEffect(() => () => { document.title = '마켓'; }, []);
 
   // 머리 아래 줄: 지금 주제의 출처와 얼마나 새것인지
   const updated = data?.updatedAt ? Date.parse(data.updatedAt) : NaN;
   let sub: ReactNode;
-  if (liveItems) sub = <>{siteOf(key)} · <LiveDot />실시간</>;
+  if (liveItems) sub = <>{siteOf(key)}<span aria-hidden>·</span><LiveBadge state="live" className="text-[14px] font-medium sm:text-[15px]" /></>;
   else if (topic && Number.isFinite(updated)) sub = <span title={`${clockLabel(updated)} 수집`}>{siteOf(key)} · {timeAgo(updated)} 수집</span>;
   else sub = isLoading || live.isLoading ? '불러오는 중…' : siteOf(key);
 
@@ -168,20 +161,20 @@ export default function NewsPage({ args }: PageProps) {
   if (pending) body = <CardSkeletons />;
   else if (!items.length && (isError || live.isError)) {
     body = (
-      <div className="rounded-[20px] bg-card">
-        <Empty icon={<Newspaper className="size-8" />}
-          action={<button onClick={() => { void refetch(); if (liveFn) void live.refetch(); }} disabled={isFetching || live.isFetching} className="press rounded-xl bg-secondary px-4 py-2 text-[14px] font-semibold text-secondary-foreground disabled:opacity-60">{isFetching || live.isFetching ? '다시 불러오는 중…' : '다시 시도'}</button>}>
-          뉴스를 불러오지 못했어요
+      <div className={CARD_CLS}>
+        <Empty icon={<Newspaper />} title="뉴스를 불러오지 못했어요"
+          action={<button onClick={() => { void refetch(); if (liveFn) void live.refetch(); }} disabled={isFetching || live.isFetching} className={EMPTY_BTN}>{isFetching || live.isFetching ? '다시 불러오는 중…' : '다시 시도'}</button>}>
+          인터넷 연결을 확인하고 다시 시도해 주세요
         </Empty>
       </div>
     );
   } else if (!items.length) {
-    body = <div className="rounded-[20px] bg-card"><Empty icon={<Newspaper className="size-8" />}>이 주제의 뉴스가 아직 없어요</Empty></div>;
+    body = <div className={CARD_CLS}><Empty icon={<Newspaper />} title="이 주제의 뉴스가 아직 없어요">10분마다 새로 모아요. 잠시 뒤 다시 확인해 주세요</Empty></div>;
   } else if (!shown.length) {
     body = (
-      <div className="rounded-[20px] bg-card">
-        <Empty icon={<Newspaper className="size-8" />}
-          action={<button onClick={() => setFilter('all')} className="press rounded-xl bg-secondary px-4 py-2 text-[14px] font-semibold text-secondary-foreground">전체 뉴스 보기</button>}>
+      <div className={CARD_CLS}>
+        <Empty icon={<Newspaper />} title={`${f === 'bull' ? '호재' : '악재'}로 본 기사가 없어요`}
+          action={<button onClick={() => setFilter('all')} className={EMPTY_BTN}>전체 뉴스 보기</button>}>
           지금 불러온 {label} 중에는 {f === 'bull' ? '호재' : '악재'}로 본 기사가 없어요
         </Empty>
       </div>
@@ -193,8 +186,8 @@ export default function NewsPage({ args }: PageProps) {
           {shown.map((r) => <NewsCard key={r.x.id || r.x.url || r.x.title} item={r.x} s={r.s} related={r.related} aiPending={aiPending(r)} />)}
         </ul>
         <a href={more.url} target="_blank" rel="noopener"
-          className="press mt-2 flex h-12 w-full items-center justify-center gap-1 rounded-[20px] bg-card px-4 text-[14px] font-semibold text-secondary-foreground hover:bg-hover">
-          <span className="truncate">{more.text}</span><ArrowUpRight className="size-4 shrink-0 text-subtle" />
+          className={`${CARD_CLS} press mt-2 flex h-12 w-full items-center justify-center gap-1 px-4 text-[14px] font-semibold text-secondary-foreground hover:bg-hover`}>
+          <span className="truncate">{more.text}</span><ArrowUpRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
         </a>
       </motion.div>
     );
@@ -203,31 +196,31 @@ export default function NewsPage({ args }: PageProps) {
   return (
     <>
       <PageTitle sub={sub} right={<GoogleEconLink />}>뉴스</PageTitle>
-      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid items-start gap-2 sm:gap-3 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-4">
         <div className="min-w-0 space-y-2">
-          <section className="rounded-[20px] bg-card px-4 pt-1 pb-4 md:px-5" aria-label="뉴스 주제와 거르기">
-            <TopicTabs tabs={tabs} value={key} onChange={pick} className="-mx-4 md:-mx-5" listClassName="px-4 md:px-5" />
+          <section className={`${CARD_CLS} px-4 pt-0.5 pb-3.5 sm:px-5 md:px-6 md:pb-[18px]`} aria-label="뉴스 주제와 거르기">
+            <TopicTabs tabs={tabs} value={key} onChange={pick} className="-mx-4 sm:-mx-5 md:-mx-6" listClassName="px-4 sm:px-5 md:px-6" />
             {judge && items.length ? (
-              <div className="mt-3 flex items-center gap-1.5">
-                <div role="group" aria-label="호재·악재로 거르기" className="flex min-w-0 gap-1.5">
+              <div className="mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+                <div role="group" aria-label="호재·악재로 거르기" className="flex min-w-0 gap-2">
                   <Chip on={f === 'all'} onClick={() => setFilter('all')}>전체 <span className="tabular">{rows.length}</span></Chip>
-                  <Chip on={f === 'bull'} tone="up" onClick={() => setFilter('bull')}>호재 <span className="tabular">{nBull}</span></Chip>
-                  <Chip on={f === 'bear'} tone="down" onClick={() => setFilter('bear')}>악재 <span className="tabular">{nBear}</span></Chip>
+                  <Chip on={f === 'bull'} tone="up" disabled={!nBull} onClick={() => setFilter('bull')}>호재 <span className="tabular">{nBull}</span></Chip>
+                  <Chip on={f === 'bear'} tone="down" disabled={!nBear} onClick={() => setFilter('bear')}>악재 <span className="tabular">{nBear}</span></Chip>
                 </div>
                 {aiOn && nAi && Number.isFinite(aiAt) ? (
-                  <span className="ml-auto flex shrink-0 items-center gap-1 text-[12.5px] text-muted-foreground tabular" title={`AI 판단 ${clockLabel(aiAt)} 갱신 · 불러온 ${rows.length}개 중 ${nAi}개`}>
-                    <Sparkles className="size-3.5 text-chart-5" />AI {nAi}개 · {timeAgo(aiAt)}
+                  <span className="flex shrink-0 items-center gap-1 text-[13px] text-muted-foreground tabular sm:ml-auto" title={`AI 판단 ${clockLabel(aiAt)} 갱신 · 불러온 ${rows.length}개 중 ${nAi}개`}>
+                    <Sparkles className="size-3.5 text-ai" aria-hidden />AI 판단 {nAi}개 · {timeAgo(aiAt)}
                   </span>
                 ) : null}
               </div>
             ) : null}
             <MentionStrip mentions={mentions} className="mt-3.5 lg:hidden" />
-            <p className="mt-2.5 text-[12.5px] leading-relaxed text-subtle break-keep">{note}</p>
+            <p className="mt-3 text-[12.5px] leading-[1.6] text-muted-foreground">{note}</p>
           </section>
           {body}
         </div>
-        <aside className="sticky top-[100px] hidden space-y-3 lg:block">
-          <TopMentions mentions={mentions} label={label} total={items.length} judged={judge} />
+        <aside className="sticky top-20 hidden space-y-4 lg:block">
+          <TopMentions mentions={mentions.slice(0, 5)} label={label} total={items.length} judged={judge} />
           {/* 따라 내려오는 칸이 화면보다 길어지지 않게 — 세로가 넉넉한 화면에서만 다른 주제 새 소식도 */}
           {topics ? <div className="hidden [@media(min-height:1060px)]:block"><LatestElsewhere topics={topics} current={key} limit={3} /></div> : null}
         </aside>

@@ -98,7 +98,7 @@ export function DataStatusCard() {
         />
       </Group>
       {errs.length > 0 && (
-        <ul className="mt-2 space-y-1.5 rounded-2xl bg-secondary/60 px-4 py-3 text-[13px] leading-snug">
+        <ul className="mt-2 space-y-1.5 rounded-[14px] bg-tile px-4 py-3 text-[13px] leading-snug">
           {errs.map(([k, v]) => (
             <li key={k} className="break-words"><b className="font-semibold">{sourceName(k)}</b> <span className="text-secondary-foreground">{String(v)}</span></li>
           ))}

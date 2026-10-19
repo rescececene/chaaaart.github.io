@@ -41,7 +41,7 @@ export function friendlyRelayError(msg: string): string {
     return '중계 서버에 닿지 못했어요. 주소가 맞는지, 인터넷이 연결돼 있는지 확인해 주세요';
   }
   if (/json|unexpected token|unexpected character|expected pattern/i.test(msg)) {
-    return '마켓렌즈 중계가 아닌 곳에서 답이 왔어요. Worker 주소가 맞는지 확인해 주세요';
+    return '마켓 중계가 아닌 곳에서 답이 왔어요. Worker 주소가 맞는지 확인해 주세요';
   }
   return msg;
 }
