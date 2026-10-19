@@ -64,8 +64,15 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: python collector/model/run.py --if-stale 30 --check >> "$GITHUB_OUTPUT"
 
+      - name: 1시간 예상 필요 여부
+        id: hcheck
+        continue-on-error: true
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python collector/model/hourly.py --check >> "$GITHUB_OUTPUT"
+
       - name: 예측 엔진 파이썬 (pip 캐시)
-        if: steps.pcheck.outputs.markets != ''
+        if: (steps.pcheck.outputs.markets != '' || steps.hcheck.outputs.markets != '')
         uses: actions/setup-python@v7
         with:
           python-version: "3.13"
@@ -74,13 +81,13 @@ jobs:
 
       - name: 예측 엔진 의존성 설치
         id: pdeps
-        if: steps.pcheck.outputs.markets != ''
+        if: (steps.pcheck.outputs.markets != '' || steps.hcheck.outputs.markets != '')
         continue-on-error: true
         timeout-minutes: 6
         run: python -m pip install --disable-pip-version-check --no-input -r collector/requirements-model.txt
 
       - name: 일봉 이력 불러오기
-        if: steps.pcheck.outputs.markets != ''
+        if: (steps.pcheck.outputs.markets != '' || steps.hcheck.outputs.markets != '')
         uses: actions/cache/restore@v6
         with:
           path: collector/.history
@@ -96,8 +103,23 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: python collector/model/run.py --if-stale 30 --deadline 20
 
+      - name: 1시간 예상 (시간봉)
+        id: hourly
+        if: steps.hcheck.outputs.markets != '' && steps.pdeps.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 12
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python collector/model/hourly.py --markets "${{ steps.hcheck.outputs.markets }}" --deadline 10
+
+      - name: 추천 모음 다시 계산
+        continue-on-error: true
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python collector/recommend.py
+
       - name: 일봉 이력 저장
-        if: always() && steps.pcheck.outputs.markets != '' && steps.predict.outcome != 'skipped'
+        if: always() && (steps.pcheck.outputs.markets != '' || steps.hcheck.outputs.markets != '') && (steps.predict.outcome != 'skipped' || steps.hourly.outcome != 'skipped')
         uses: actions/cache/save@v6
         with:
           path: collector/.history

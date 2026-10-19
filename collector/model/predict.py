@@ -19,6 +19,7 @@ import explain
 import features
 import history
 import outlook
+import recrule
 import sources
 
 N_PICKS, N_AVOID, SPARK = 20, 10, 60
@@ -92,6 +93,32 @@ def is_pegged(market, code, a):
     return bool(np.all(np.abs(c / med - 1) < 0.02) and np.std(r) < 0.003)
 
 
+def aux_for(market, P, hist_dir, all_groups=False):
+    """추가 특징에 필요한 바깥 데이터: 코인 = 다른 거래소 같은 코인 종가(김치 프리미엄), 국내 = 외국인 보유율"""
+    import pandas as pd
+    aux = {}
+    groups = list(features.GROUPS) if all_groups else (features.EXTRA_GROUPS.get(market) or [])
+    if market in ("upbit", "binance") and "kp" in groups:
+        other = "binance" if market == "upbit" else "upbit"
+        cols = {}
+        for code, a in history.load_market(other, Path(hist_dir)).items():
+            if other == "binance" and code.endswith("USDT"):
+                mine = "KRW-" + code[:-4]
+            elif other == "upbit" and code.startswith("KRW-"):
+                mine = code[4:] + "USDT"
+            else:
+                continue
+            if mine in P["c"].columns and len(a["t"]):
+                cols[mine] = pd.Series(a["c"], index=pd.to_datetime(a["t"], unit="s"))
+        if cols:
+            aux["other_c"] = pd.DataFrame(cols).sort_index()
+    if market == "krx" and "frgn" in groups:
+        import flows
+        fr = {c.split("#")[0]: flows.load(c.split("#")[0]) for c in P["c"].columns}
+        aux["frgn"] = {k: v for k, v in fr.items() if v}
+    return aux
+
+
 VERDICT_TEXT = {
     "strong": "판정: 검증 기간에는 통계적으로 뚜렷한 순위 예측력이 있었어요. 다만 미래에도 유지된다는 보장은 없어요.",
     "weak": "판정: 약한 편이에요(통계적으로 뚜렷하지 않거나, 기간·시장 국면에 따라 흔들렸어요). 순위는 참고 정도로만 보세요.",
@@ -103,12 +130,13 @@ GRADE_KO = {"good": "양호", "weak": "약함", "poor": "참고 낮음"}
 
 
 def outlook_note(market, olbt):
-    unit = "일" if market in ("upbit", "binance") else "거래일"
+    unit0 = "일" if market in ("upbit", "binance") else "거래일"
     parts, poor = [], []
     for label, b in (olbt or {}).items():
         if not b:
             parts.append(f"{label} 검증 기간 부족")
             continue
+        unit = "시간" if b.get("unit") == "h" else unit0
         base = f"(같은 종목 아무 날 기준 {b['baseDirHit'] * 100:.0f}%)" if _fin(b.get("baseDirHit")) else ""
         parts.append(f"{label}({b['h']}{unit}) 범위 적중 {b['coverage'] * 100:.0f}%·방향 적중 {b['dirHit'] * 100:.0f}%{base}·"
                      f"확률 보정 오차 {b['calibErr'] * 100:.0f}%p → {GRADE_KO[b['grade']]}")
@@ -116,7 +144,7 @@ def outlook_note(market, olbt):
             poor.append(label)
     if not parts:
         return None
-    s = ("단기·중기·장기 예상은 지금과 비슷했던 과거 자리 최대 100개(같은 시장, 날짜당 2개까지, 결과가 이미 확정된 자리만)의 "
+    s = ("단기(1시간)·중기(1일)·장기(1주) 예상은 지금과 비슷했던 과거 자리 최대 100개(같은 시장, 시각당 2개까지, 결과가 이미 확정된 자리만)의 "
          "실제 결과로 만든 분포예요(모형 점수와 별개). 과거로 되돌려 같은 방식으로 검증한 결과: " + "; ".join(parts) + ".")
     if poor:
         s += (f" {'·'.join(poor)} 예상은 '오를 확률'·방향이 '같은 종목을 아무 날이나 샀을 때'보다 낫다는 근거가 없거나 오히려 "
@@ -192,11 +220,23 @@ def make_notes(market, bt, cal, qcal, an, ctx):
     notes.append(f"검증 방식: 날짜 순 워크포워드(학습 끝과 검증 시작 사이 {H}+5{unit} 비움). 목표는 같은 날 같은 시장 유니버스 "
                  f"중앙값 대비 {H}{unit} 초과수익이에요. '평균 초과수익'은 상위 10% 평균 − 유니버스 평균이라 무작위로 고르면 0 이에요. "
                  "수수료·세금·슬리피지는 빼지 않았어요.")
+    sb = ctx.get("bins")
     if bt and bt["verdict"] == "none":
-        notes.append("'이길 확률'은 이 시장에서 근거가 없어 내보내지 않아요.")
-    elif cal:
-        notes.append(f"'이길 확률'(probUp)은 검증 기간 예측 {cal['n']:,}건으로 보정한 '{H}{unit} 동안 같은 시장 유니버스 "
-                     "중앙값을 이길 확률'이에요. 가격이 오를 확률이 아니에요.")
+        notes.append("점수: 이 시장은 검증에서 근거가 없어 점수·'시장 이길 확률' 대신 '판단 보류'로 둬요. 순서는 참고용이에요.")
+    elif sb:
+        w = engine.GRADE_W.get(bt["verdict"] if bt else "none", 0)
+        top = sb["bins"][-1]
+        s = (f"점수 = '시장 이길 확률' × 100 이에요. 과거 검증 구간({sb['from']}~{sb['to']}, {sb['n']:,}건)에서 오늘과 같은 점수 "
+             f"구간(10등분)에 있던 종목들이 실제로 {H}{unit} 뒤 같은 시장 중앙값을 이긴 비율이고, 예상 초과수익도 그 구간 "
+             f"종목들의 실제 결과(10·50·90%)예요. 최상위 구간은 실제로 {top['hit'] * 100:.0f}%가 이겼고 초과수익 중앙값 "
+             f"{top['q50'] * 100:+.2f}%p였어요.")
+        if w < 1:
+            s += f" 검증 등급이 '약함'이라 확률·초과수익을 기준(50%·0)쪽으로 절반만 반영했어요."
+        rel = sb.get("reliability") or {}
+        if rel.get("topHit") is not None:
+            s += (f" 표를 앞 70%로 만들고 뒤 30%({rel['from']}~)에서 확인하니 최상위 구간 예상 {rel['topPredHit'] * 100:.0f}% → "
+                  f"실제 {rel['topHit'] * 100:.0f}%, 구간 평균 오차 {rel['calibErr'] * 100:.1f}%p였어요.")
+        notes.append(s + " 가격이 오를 확률이 아니라 '시장보다 나을' 확률이에요.")
     if qcal and _fin(qcal.get("coverage")):
         s = ("예상 범위(10~90%)·중앙값: 이 모형은 시장 전체가 오를지 내릴지는 맞히지 못해서, 중앙값은 '시장 보합(0%)'을 "
              "기준으로 종목의 상대적인 기울기만 얹었어요(분위 회귀 + 최근 구간 보정). 보정에 안 쓴 최근 구간에서 실제 수익이 "
@@ -268,6 +308,10 @@ def run_market(market, uni, hist_dir, out_dir, limit=0, max_days=None, threads=4
     n_extra = len([c for c in arrs if c not in uset and c not in collide])
     P = features.build_panel(arrs, idx.get("listed"), max_days, market=market)
     F, M = features.compute_features(P, market)
+    groups = features.EXTRA_GROUPS.get(market) or []
+    if groups:
+        added, addm = features.extra_features(P, F, M, market, groups, aux_for(market, P, hist_dir))
+        log(f"  [{market}] 추가 특징 {groups}: {added + addm}")
     ds = features.build_dataset(P, F, M, market)
     T = len(P["dates"])
     ds["starts"] = engine.date_starts(ds["ti"], T)
@@ -313,6 +357,24 @@ def run_market(market, uni, hist_dir, out_dir, limit=0, max_days=None, threads=4
     if cal:
         log(f"  · 확률 보정 a {cal['a']:+.3f} b {cal['b']:+.3f}, σ {_f(cal.get('sigma'), '.4f')}, 10분위 적중 "
             f"{[round(x['hit'], 3) if x else None for x in cal['byDecile']]}")
+    bins = engine.score_bins(ds, score_oos, pl)
+    if bins:
+        rel = bins.get("reliability") or {}
+        log(f"  · 점수 구간표: 10구간 이긴 비율 {[round(b['hit'], 3) for b in bins['bins']]} / 보류 신뢰도 오차 "
+            f"{_f(rel.get('calibErr'), '.3f')}, 최상위 구간 예상 {_f(rel.get('topPredHit'), '.3f')} → 실제 {_f(rel.get('topHit'), '.3f')}")
+    recbt = None
+    if bt:
+        try:
+            tr0 = time.time()
+            us_bases = set()
+            if market == "binance":
+                us_bases = {c.split(".")[0] for c in history.load_index(Path(hist_dir) / "us")["universe"]}
+            tok = [c for c in P["codes"] if recrule.is_stock_token(market, str(c).split("#")[0],
+                                                                    (uni["names"].get(c) or [None])[0], us_bases)]
+            recbt = recrule.backtest(ds, score_oos, pl, P, F, M, market, log=log, excl_codes=tok)
+            log(f"  · 추천 규칙 백테스트 {time.time() - tr0:.0f}초")
+        except Exception as e:  # 백테스트 실패가 예측을 막지 않게
+            log(f"  · 추천 규칙 백테스트 실패: {e}")
     an = None
     if bt:
         ta = time.time()
@@ -350,9 +412,12 @@ def run_market(market, uni, hist_dir, out_dir, limit=0, max_days=None, threads=4
     score_set = uset - lag_set
     el_last = P["elig"].iloc[[last]].copy()
     el_last.iloc[0, ~P["elig"].columns.isin(list(score_set))] = False
-    raw_vals = {k: F[k].iloc[last].values for k in features.FEATURES}
-    pct_vals = {k: features.xs_rank(F[k].iloc[[last]], el_last).iloc[0].values for k in features.FEATURES}
-    reg_vals = {k: float(M[k].iloc[last]) for k in features.REGIME}
+    raw_vals = {k: F[k].iloc[last].values for k in F}
+    pct_vals = {k: features.xs_rank(F[k].iloc[[last]], el_last).iloc[0].values for k in F}
+    reg_vals = {k: float(M[k].iloc[last]) for k in M}
+    sel_u = el_last.iloc[0].values
+    mkt_med = {k: float(np.nanmedian(np.where(sel_u, raw_vals[k], np.nan))) if sel_u.any() else None
+               for k in raw_vals if k.startswith("ret_")}
 
     in_u = [i for i, c in enumerate(codes_today) if c in score_set]
     if not in_u:
@@ -367,6 +432,19 @@ def run_market(market, uni, hist_dir, out_dir, limit=0, max_days=None, threads=4
     warn = set(uni.get("warn") or ())
     # 단기·중기·장기 예상 — 비슷한 과거 자리(백데이터)의 실제 결과 + 워크포워드 검증 (모형 점수와 별개)
     ol, olbt = outlook.run(P, F, M, market, [int(ds["si"][rows[i]]) for i in order], log=log)
+    _hr = _hourly(market)
+    olbt = {"단기": (_hr or {}).get("backtest"), **olbt}
+    with np.errstate(all="ignore"):
+        dv_last = (P["c"] * P["v"]).iloc[-20:].mean().values
+    dv_s = np.where(el_last.iloc[0].values & np.isfinite(dv_last), dv_last, np.nan)
+    okd = np.isfinite(dv_s)
+    rec_dv_pct = np.full(len(dv_s), np.nan)
+    if okd.any():
+        rr = np.empty(okd.sum())
+        rr[np.argsort(dv_s[okd], kind="stable")] = np.arange(okd.sum())
+        rec_dv_pct[okd] = (rr + 0.5) / okd.sum()
+    flag_heat, flag_down = _flags_last(P, market)
+    hourly = _hourly(market)
     out_sym = Path(out_dir) / "sym" / market
     written = set()
     items = []
@@ -374,12 +452,15 @@ def run_market(market, uni, hist_dir, out_dir, limit=0, max_days=None, threads=4
     for rank, i in enumerate(order, start=1):
         code = codes_today[i]
         j = int(ds["si"][rows[i]])
-        score = 100.0 * (n_u - rank) / (n_u - 1) if n_u > 1 else 50.0
-        pu = engine.prob_up(cal, float(pct_all[i])) if verdict != "none" else None
+        pct_rank = 100.0 * (n_u - rank) / (n_u - 1) if n_u > 1 else 50.0
+        # 근거 있는 점수: 오늘 백분위가 속한 구간의 과거(검증 구간) 실제 결과 × 검증 등급 (none 이면 판단 보류)
+        g = engine.grounded(bins, float(pct_all[i]), verdict)
+        score = g["score"] if g else None
+        pu = g["probBeat"] if g else None
         q = [math.expm1(float(v)) for v in qlog[i]]
         its = []
         for col, k in enumerate(ukeys):
-            if k in features.REGIME:
+            if k in M:
                 its.append((k, reg_vals[k], None, float(impact_b[i, col]), float(z_b[i, col])))
             else:
                 p = float(pct_vals[k][j])
@@ -387,26 +468,36 @@ def run_market(market, uni, hist_dir, out_dir, limit=0, max_days=None, threads=4
                             float(impact_b[i, col]), float(z_b[i, col])))
         col_c = C[:, j]
         hist_n = int(np.isfinite(col_c[-w52:]).sum())
-        reasons, contribs = explain.build(its, market, hist=hist_n)
+        reasons, contribs = explain.build(its, market, hist=hist_n, mkt=mkt_med)
         z = analogs.znorm(col_c)
         an_items = analogs.describe(col_c, dates, analogs.find(z, col_c, last, H, actual=A[:, j]), H)
         an_stats = analogs.stats(an_items)
         spark = [float(x) for x in col_c[-SPARK:] if math.isfinite(x)]
         nm = names.get(code) or [code, code, None]
+        rv = {k: (float(raw_vals[k][j]) if k in raw_vals and math.isfinite(float(raw_vals[k][j])) else None)
+              for k in ("atr_14", "vol_60", "ret_20")}
+        lo20 = P["l"].iloc[-20:, j].min()
+        recx = {"close": float(col_c[last]), "atr": rv["atr_14"], "lo20": float(lo20) if math.isfinite(lo20) else None,
+                "dvPct": _nz(rec_dv_pct[j]), "volPct": _nz(pct_vals["vol_60"][j]), "obs": int(P["obs"].iloc[last, j]),
+                "heat": bool(flag_heat[j]), "down": bool(flag_down[j])}
         rec = {"sym": f"{market}:{code}", "name": nm[0], "sub": nm[1], "asOf": as_of, "horizon": H,
-               "score": round(score, 1), "rank": rank, "of": n_u, "probUp": pu,
+               "score": score, "pctRank": round(pct_rank, 1), "grade": verdict, "hold": g is None,
+               "probBeat": pu, "expEx": g["expEx"] if g else None,
+               "rank": rank, "of": n_u, "probUp": pu,
                "q10": q[0], "q50": q[1], "q90": q[2],
                "cone": engine.cone([float(v) for v in qlog[i]], H),
                "reasons": reasons, "contrib": contribs, "analogs": an_items, "analogStats": an_stats,
-               "outlook": ol[j]}
+               "outlook": [_hourly_item(hourly, code)] + ol[j]}
         write_json(out_sym / f"{safe_code(code)}.json", rec)
         written.add(f"{safe_code(code)}.json")
         items.append({"sym": rec["sym"], "name": rec["name"], "sub": rec["sub"], "score": rec["score"], "rank": rank,
+                      "pctRank": rec["pctRank"], "grade": verdict, "hold": g is None, "probBeat": pu,
+                      "expEx": rec["expEx"], "rec": recx,
                       "probUp": pu, "q10": q[0], "q50": q[1], "q90": q[2], "reasons": reasons, "spark": spark,
                       "analog": ({"n": an_stats["n"], "winRate": an_stats["winRate"], "avg": an_stats["avg"]}
                                  if an_stats else None),
-                      "outlook": [{"h": o["h"], "label": o["label"], "q50": o["q50"], "win": o["win"], "grade": o["grade"]}
-                                  for o in ol[j]],
+                      "outlook": [{"h": o["h"], "unit": o.get("unit", "d"), "label": o["label"], "q50": o["q50"],
+                                   "win": o["win"], "grade": o["grade"]} for o in rec["outlook"]],
                       "_warn": code in warn})
     # 유니버스에서 빠진(또는 오늘 점수에서 뺀) 종목의 지난 결과 파일은 지운다 (오래된 예측이 남아 보이지 않게)
     for p in out_sym.glob("*.json"):
@@ -415,7 +506,8 @@ def run_market(market, uni, hist_dir, out_dir, limit=0, max_days=None, threads=4
                 p.unlink()
             except OSError:
                 pass
-    picks = [x for x in items if not x["_warn"]][:N_PICKS]
+    # 추천 모음(recommend.py)이 상위 10% 전체에서 고를 수 있게 picks 는 최소 상위 10% 까지
+    picks = [x for x in items if not x["_warn"]][:max(N_PICKS, math.ceil(0.1 * n_u))]
     avoid = sorted(items, key=lambda x: x["rank"], reverse=True)[:N_AVOID]
     for x in items:
         x.pop("_warn", None)
@@ -432,17 +524,76 @@ def run_market(market, uni, hist_dir, out_dir, limit=0, max_days=None, threads=4
     ctx = {"n_extra": n_extra, "warn_n": len([c for c in warn if c in uset]),
            "pegged_n": len(pegged & set(uni["codes"])), "n_adj": P["adjusted"], "top_feats": top_feats,
            "n_short": n_short, "n_lag": len(lag), "as_of": as_of,
-           "hist_years": (dates[-1] - dates[0]).days / 365.25, "olbt": olbt}
+           "hist_years": (dates[-1] - dates[0]).days / 365.25, "olbt": olbt, "bins": bins}
     res = {
         "asOf": as_of, "horizon": H, "universe": n_u,
         "model": {"kind": engine.KIND_NAME, "trainedAt": now_iso(), "trainRows": int(n_train), "features": int(ds["Xr"].shape[1])},
         "backtest": backtest,
         "notes": make_notes(market, bt, cal, qcal, an, ctx),
         "picks": picks, "avoid": avoid,
+        "grade": verdict,
+        "scoreBins": ({"bins": bins["bins"], "reliability": bins["reliability"], "n": bins["n"], "from": bins["from"],
+                       "to": bins["to"], "gradeWeight": engine.GRADE_W.get(verdict)} if bins else None),
+        "recBacktest": recbt,
+        "regime": {"mkt20": reg_vals.get("mkt_ret_20"), "breadth": reg_vals.get("mkt_breadth")},
         "outlookBacktest": olbt,  # write_summary 가 summary 최상위 outlookBacktest[market] 으로 옮긴다
     }
     log(f"[{market}] 예측 {n_u}종목 기준일 {as_of} 판정 {verdict} — 파일 {time.time() - ta:.0f}초, 시장 전체 {time.time() - t0:.0f}초")
     return res
+
+
+def _nz(x):
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        return None
+    return x if math.isfinite(x) else None
+
+
+def _flags_last(P, market):
+    """마지막 날 과열 주의·하락 경고 (setups.py 판정)"""
+    import setups
+    N = len(P["codes"])
+    heat, down = np.zeros(N, bool), np.zeros(N, bool)
+    prm = setups.params(market)
+    cols = {k: P[k].iloc[-260:].values for k in ("o", "h", "l", "c", "v")}
+    for j in range(N):
+        c = cols["c"][:, j]
+        ok = np.isfinite(c)
+        if ok.sum() < 30 or not ok[-1]:
+            continue
+        gaps = np.nonzero(~ok)[0]
+        a = int(gaps[-1]) + 1 if len(gaps) else 0
+        S = setups.Series(*(np.nan_to_num(cols[k][a:, j]).tolist() for k in ("o", "h", "l", "c", "v")))
+        i = len(c) - a - 1
+        for arr, fn in ((heat, setups.overheat), (down, setups.downtrend_warn)):
+            try:
+                arr[j] = fn(S, i, prm, False) is not None
+            except (TypeError, ZeroDivisionError, ValueError, IndexError):
+                pass
+    return heat, down
+
+
+HOURLY_DIR = Path(__file__).resolve().parent.parent.parent / "web" / "public" / "data" / "predict" / "hourly"
+
+
+def _hourly(market):
+    try:
+        return json.loads((HOURLY_DIR / f"{market}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _hourly_item(hr, code):
+    """단기(1시간) 항목 — hourly.py 결과(따로 매시간 갱신)를 학습 시점 값으로 넣어 둔다. 최신 값은 predict/hourly/<시장>.json"""
+    item = {"h": 1, "unit": "h", "label": "단기", "n": 0, "q10": None, "q50": None, "q90": None, "win": None,
+            "base": None, "grade": (hr or {}).get("grade"), "asOf": (hr or {}).get("asOf"), "src": "hourly"}
+    it = ((hr or {}).get("items") or {}).get(code)
+    if it:
+        item.update(n=it["n"], q10=it["q10"], q50=it["q50"], q90=it["q90"], win=it["win"])
+    else:
+        item["reason"] = (hr or {}).get("reason") or "1시간 예상이 아직 없어요(시간봉 이력이 짧거나 이 종목은 시간봉을 받지 않아요)."
+    return item
 
 
 def _pct(x):

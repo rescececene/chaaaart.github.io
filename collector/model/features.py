@@ -13,7 +13,9 @@ import pandas as pd
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy.special import ndtri
 
-HORIZON = {"upbit": 14, "binance": 14, "krx": 20, "us": 20}  # 코인: 달력일(7일 무휴), 주식: 거래일
+# 코인: 달력일(7일 무휴), 주식: 거래일. research.py 사전 등록 규칙(개발 구간 연율 IC IR 최대 + 비용 후 상위 10% > 0,
+# 지금보다 1.2배 이상일 때만 교체, 보류 구간 IC > 0)으로 고른 값 — 2026-10-20: 업비트·미국 1, 바이낸스 14, 국내 20 유지
+HORIZON = {"upbit": 1, "binance": 14, "krx": 20, "us": 1}
 W52 = {"upbit": 365, "binance": 365, "krx": 250, "us": 250}   # 52주 고점/저점 창 (코인은 있는 만큼)
 # 12-1 모멘텀 (최근 1개월을 뺀 1년 수익률): (건너뛰는 최근 봉 수, 1년 봉 수) — 코인은 달력일, 주식은 거래일
 MOM_WIN = {"upbit": (30, 365), "binance": (30, 365), "krx": (20, 250), "us": (20, 250)}
@@ -297,25 +299,27 @@ def xs_rank(df, elig):
     return (x.rank(axis=1) - 0.5).div(n.where(n > 0), axis=0)
 
 
-def build_dataset(P, F, M, market):
+def build_dataset(P, F, M, market, H=None):
     """긴 형식(행 = 날짜×종목, 날짜 순으로 연속) 학습 데이터"""
-    H = HORIZON[market]
+    H = H or HORIZON[market]
     elig = P["elig"]
     C = P["c"]
     mask = elig.values
     ti, si = np.nonzero(mask)  # 행 우선 → 날짜 순으로 연속 (랭커의 그룹 조건)
     T, N = mask.shape
-    rank_keys = [k for k in FEATURES if k not in RANK_SKIP]
+    fkeys = [k for k in F]  # 기본 특징 + extra_features 로 더한 특징 (넣은 순서 그대로)
+    mkeys = [k for k in M]
+    rank_keys = [k for k in fkeys if k not in RANK_SKIP]
     rank_cols, raw_cols = [], []
     for k in rank_keys:
         rank_cols.append(xs_rank(F[k], elig).values[mask])
-    for k in FEATURES:
+    for k in fkeys:
         raw_cols.append(F[k].values[mask])
-    reg_cols = [np.broadcast_to(M[k].values[:, None], (T, N))[mask] for k in REGIME]
+    reg_cols = [np.broadcast_to(M[k].values[:, None], (T, N))[mask] for k in mkeys]
     ranker_cols = rank_cols + [F[k].values[mask] for k in RAW_FOR_RANKER] + reg_cols
-    ranker_names = [f"r:{k}" for k in rank_keys] + [f"v:{k}" for k in RAW_FOR_RANKER] + [f"m:{k}" for k in REGIME]
+    ranker_names = [f"r:{k}" for k in rank_keys] + [f"v:{k}" for k in RAW_FOR_RANKER] + [f"m:{k}" for k in mkeys]
     q_cols = raw_cols + reg_cols
-    q_names = [f"v:{k}" for k in FEATURES] + [f"m:{k}" for k in REGIME]
+    q_names = [f"v:{k}" for k in fkeys] + [f"m:{k}" for k in mkeys]
     Xr = np.ascontiguousarray(np.column_stack(ranker_cols).astype(np.float32))
     Xq = np.ascontiguousarray(np.column_stack(q_cols).astype(np.float32))
     # 목표값: H 일(거래일) 뒤 수익률과 같은 날 시장 중앙값 대비 초과수익 — 학습 라벨에만 미래가 들어간다
@@ -337,3 +341,98 @@ def build_dataset(P, F, M, market):
         "fwd": fwd.astype(np.float64), "excess": excess.astype(np.float64), "ygauss": ygauss.astype(np.float64),
         "has_label": np.isfinite(fwd),
     }
+
+
+# ── 추가 특징 묶음 (research.py 로 검증해 시장별로 채택한 것만 EXTRA_GROUPS 에 둔다) ──────────────────
+# 키 → (한국어 이름, 종류). 모두 t 시점까지의 값만 쓴다 (rolling·같은 날 횡단면).
+EXTRA = {
+    "ram_20": ("변동성 대비 20일 수익", "num"), "ram_120": ("변동성 대비 120일 수익", "num"),
+    "mom_va": ("변동성 대비 12-1 모멘텀", "num"),
+    "rev_1i": ("시장 영향을 뺀 1일 수익(단기 반전)", "pct"), "rev_5i": ("시장 영향을 뺀 5일 수익(단기 반전)", "pct"),
+    "dv_20": ("20일 평균 거래대금(로그)", "num"), "dv_trend": ("거래대금 추세(5/60일)", "x"),
+    "amihud_20": ("비유동성(가격 충격, 로그)", "num"),
+    "hi_20": ("20일 고점 대비", "pct"), "dsh_52w": ("52주 고점 뒤 지난 기간 비율", "num"),
+    "beta_btc": ("비트코인 베타(60일)", "num"), "corr_btc": ("비트코인 상관(60일)", "num"),
+    "kp_rel": ("김치 프리미엄(시장 평균 대비)", "pct"), "kp_chg5": ("김치 프리미엄 5일 변화", "pct"),
+    "frgn_d5": ("외국인 보유율 5일 변화", "pp"), "frgn_d20": ("외국인 보유율 20일 변화", "pp"),
+    "frgn_lvl": ("외국인 보유율", "pp"),
+}
+EXTRA_REGIME = {"btc_ret_20": ("비트코인 20일 수익률", "pct")}
+GROUPS = {
+    "vam": ["ram_20", "ram_120", "mom_va"], "rev": ["rev_1i", "rev_5i"], "liq": ["dv_20", "dv_trend", "amihud_20"],
+    "hi": ["hi_20", "dsh_52w"], "btc": ["beta_btc", "corr_btc", "btc_ret_20"], "kp": ["kp_rel", "kp_chg5"],
+    "frgn": ["frgn_d5", "frgn_d20", "frgn_lvl"],
+}
+GROUP_MARKETS = {"btc": ("upbit", "binance"), "kp": ("upbit", "binance"), "frgn": ("krx",)}
+# 시장별 채택 묶음 — research.py 의 사전 등록 규칙(개발 구간 ΔIC·짝 t, 보류 구간 최종 확인)을 통과한 것만
+EXTRA_GROUPS = {"upbit": ["kp"], "binance": [], "krx": ["liq"], "us": []}  # 2026-10-20 연구 결과 (보류 구간 확인 통과)
+
+
+def _btc_col(C, market):
+    for k in ("KRW-BTC", "BTCUSDT"):
+        if k in C.columns:
+            return k
+    return None
+
+
+def extra_features(P, F, M, market, groups, aux=None):
+    """F·M 에 추가 특징을 더한다 (제자리). aux: {"other_c": 다른 거래소 종가 DataFrame(김프), "frgn": {code: {t,f}}}"""
+    aux = aux or {}
+    C, Hh, V, elig = P["c"], P["h"], P["v"], P["elig"]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        r = np.log(C).diff()
+        new = {}
+        newm = {}
+        if "vam" in groups:
+            skip, year = MOM_WIN[market]
+            new["ram_20"] = F["ret_20"] / (F["vol_20"] * math.sqrt(20))
+            new["ram_120"] = F["ret_120"] / (F["vol_60"] * math.sqrt(120))
+            new["mom_va"] = F["mom_12_1"] / (F["vol_60"] * math.sqrt(year - skip))
+        if "rev" in groups:
+            for k, key in ((1, "rev_1i"), (5, "rev_5i")):
+                mk = _xs_median(F[f"ret_{k}"], elig)
+                new[key] = F[f"ret_{k}"] - F["beta_60"].fillna(1.0).mul(mk, axis=0)
+        if "liq" in groups:
+            dv = (C * V).where(V > 0)
+            new["dv_20"] = np.log(dv.rolling(20, min_periods=10).mean())
+            new["dv_trend"] = dv.rolling(5, min_periods=3).mean() / dv.rolling(60, min_periods=30).mean()
+            new["amihud_20"] = np.log((r.abs() / dv).rolling(20, min_periods=10).mean() * 1e9 + 1e-12)
+        if "hi" in groups:
+            w = W52[market]
+            new["hi_20"] = C / Hh.rolling(20).max() - 1
+            arg = Hh.rolling(w, min_periods=60).apply(lambda x: len(x) - 1 - np.argmax(x), raw=True)
+            new["dsh_52w"] = arg / w
+        if "btc" in groups:
+            b = _btc_col(C, market)
+            if b is not None:
+                rb = r[b]
+                mr, mb = r.rolling(60).mean(), rb.rolling(60).mean()
+                cov = r.mul(rb, axis=0).rolling(60).mean() - mr.mul(mb, axis=0)
+                vb = rb.rolling(60).var(ddof=0)
+                new["beta_btc"] = cov.div(vb.where(vb > 0), axis=0)
+                new["corr_btc"] = cov / (r.rolling(60).std(ddof=0).mul(np.sqrt(vb), axis=0))
+                newm["btc_ret_20"] = C[b] / C[b].shift(20) - 1
+        if "kp" in groups and aux.get("other_c") is not None:
+            O = aux["other_c"].reindex(C.index)  # 같은 코인(열 이름을 이쪽 코드로 맞춘) 다른 거래소 종가
+            O = O.reindex(columns=C.columns)
+            ratio = (C / O) if market == "upbit" else (O / C)  # 원화가/달러가
+            lr = np.log(ratio)
+            kp = lr.sub(lr.median(axis=1), axis=0)  # 그날 겹치는 코인들의 중앙값 = 환율 → 코인별 상대 프리미엄
+            new["kp_rel"] = kp
+            new["kp_chg5"] = kp - kp.shift(5)
+        if "frgn" in groups and aux.get("frgn"):
+            fr = {}
+            for code in C.columns:
+                a = aux["frgn"].get(code.split("#")[0]) if "#" not in code else None
+                if a is not None and len(a["t"]):
+                    fr[code] = pd.Series(a["f"], index=pd.to_datetime(a["t"], unit="s"))
+            Fr = pd.DataFrame(fr).reindex(C.index).reindex(columns=C.columns)
+            Fr = Fr.where(P["actual"]).ffill(limit=FFILL_LIMIT)
+            new["frgn_d5"] = Fr - Fr.shift(5)
+            new["frgn_d20"] = Fr - Fr.shift(20)
+            new["frgn_lvl"] = Fr
+    for k, v in new.items():
+        F[k] = v.replace([np.inf, -np.inf], np.nan).where(elig)
+    for k, v in newm.items():
+        M[k] = v.replace([np.inf, -np.inf], np.nan)
+    return list(new), list(newm)

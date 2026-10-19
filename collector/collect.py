@@ -278,6 +278,11 @@ def main():
     except Exception:
         traceback.print_exc()
 
+    try:  # 추천 모음 — 예측 엔진 결과 + 방금 만든 스크리너·뉴스 상태로 다시 거르기 (1초 미만, 표준 라이브러리)
+        import recommend
+        recommend.run(OUT)
+    except Exception:
+        traceback.print_exc()
     write("meta.json", {"updatedAt": now_iso(), "secs": round(time.time() - t0), "errors": errors})
     print(f"완료 {time.time() - t0:.0f}초" + (f" / 오류: {errors}" if errors else ""))
 

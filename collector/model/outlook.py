@@ -1,7 +1,7 @@
 """단기·중기·장기 예상 수익 — '지금과 비슷했던 과거 자리'의 실제 결과(백데이터)로만 만든 분포 + 그 방법의 워크포워드 검증
 
 방법 (모형 점수는 쓰지 않는다 — 순위 모형은 이 기간들을 학습하지 않았다)
-- 기간: 주식 5·20·60거래일, 코인 7·30·90일
+- 기간: 중기 1일·장기 1주 (주식 1·5거래일, 코인 1·7일). 단기 1시간은 hourly.py
 - 자리 특징 10개 (그날까지의 데이터만): 5·20·60일 수익률(변동성 단위), RSI, 볼린저 %B, 52주 고점 대비, 60일 변동성(로그),
   거래량 추세(로그), 시장 전체 20일 추세·변동성
 - 같은 시장 모든 종목(같은 종목 포함)의 과거 자리 중 특징 거리가 가장 가까운 K=100개. 한 날짜에서 최대 2개만
@@ -18,8 +18,9 @@ import time
 
 import numpy as np
 
-HORIZONS = {"upbit": (7, 30, 90), "binance": (7, 30, 90), "krx": (5, 20, 60), "us": (5, 20, 60)}
-LABELS = ("단기", "중기", "장기")
+# 단기(1시간)는 hourly.py(시간봉)가 따로 만든다. 여기서는 중기 1일 · 장기 1주 (주식 1·5거래일, 코인 1·7일)
+HORIZONS = {"upbit": (1, 7), "binance": (1, 7), "krx": (1, 5), "us": (1, 5)}
+LABELS = ("중기", "장기")
 K, K_BIG, PER_DATE = 100, 600, 2
 MIN_N = 15          # 비슷한 자리가 이보다 적으면 그 기간은 내지 않는다
 BASE_MIN = 30       # 같은 종목 기준값에 필요한 과거 표본 수
@@ -159,7 +160,8 @@ def backtest_h(X, ok, y, pool, base, h, last, first_ok):
     d_min = first_ok + MIN_HISTORY + h
     days = []
     d = last - h
-    while d >= d_min and len(days) < MAX_PERIODS:
+    cap = 60 if h <= 1 else MAX_PERIODS  # 1일 기간은 평가일이 촘촘해도 겹치지 않으므로 더 많이
+    while d >= d_min and len(days) < cap:
         days.append(d)
         d -= h
     rec = {k: [] for k in ("y", "q10", "q50", "q90", "win", "bwin", "bq50")}
@@ -244,7 +246,7 @@ def run(P, F, M, market, js_today, log=print):
             res = {j: (int(n[i]), q10[i], q50[i], q90[i], win[i]) for i, j in enumerate(qj)}
         for j in js_today:
             bj = base.at(j, last - h)
-            item = {"h": h, "label": label, "n": 0, "q10": None, "q50": None, "q90": None, "win": None,
+            item = {"h": h, "unit": "d", "label": label, "n": 0, "q10": None, "q50": None, "q90": None, "win": None,
                     "base": {"q50": bj[0], "win": bj[1]} if bj else None, "grade": grade}
             if j not in res:
                 item["reason"] = ("이력이 짧아 지금 자리의 특징을 계산할 수 없어요." if not ok[last, j]

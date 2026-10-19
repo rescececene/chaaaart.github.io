@@ -9,6 +9,7 @@ import { useRoute } from '@/lib/router';
 export interface PageProps { args: string[] }
 // 화면별로 코드를 나눠 처음 열 때 필요한 것만 받는다 (차트 라이브러리는 차트 화면에서만)
 const PAGES: Record<string, ComponentType<PageProps>> = {
+  recommend: lazy(() => import('@/pages/RecommendPage')),
   market: lazy(() => import('@/pages/MarketPage')),
   picks: lazy(() => import('@/pages/PicksPage')),
   chart: lazy(() => import('@/pages/ChartPage')),
@@ -23,7 +24,7 @@ function PageFallback() {
 
 export default function App() {
   const route = useRoute();
-  const Page = PAGES[route.page] || PAGES.market;
+  const Page = PAGES[route.page] || PAGES.recommend;
   return (
     // 기기에서 '동작 줄이기'를 켜면 세그먼트·밑줄이 미끄러지지 않고 바로 바뀐다
     <MotionConfig reducedMotion="user">

@@ -1,4 +1,4 @@
-// 이 자리에서 사면 — 단기·중기·장기 (주식 5·20·60 거래일, 코인 7·30·90일)
+// 이 자리에서 사면 — 1시간 · 1일 · 1주 (outlook 의 unit 'h'|'d' 를 따른다. 1시간은 매시간 새로 만드는 predict/hourly/<시장>.json 으로 덮는다)
 // 지금과 비슷했던 과거 자리에서 실제로 어땠는지의 분포 (collector/model — predict/sym/*.json 의 outlook)와,
 // 그 방식을 과거 시점으로 되돌려 확인한 결과 (predict/summary.json 의 outlookBacktest). 정적 파일만 — 중계 요청 없음.
 // 문구는 단정하지 않는다: '이만큼 먹을 수 있다'가 아니라 '과거 비슷한 자리에선 보통 이 범위였어요'.
@@ -9,7 +9,9 @@ import { signedPct } from '@/components/common/Change';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ListingCaution, useNewsState } from '@/components/news/Study';
 import { coinBase } from '@/lib/coins';
-import { MARKETS, predictSummary, predictSymbol, type Market, type OutlookCheck, type OutlookGrade, type OutlookItem, type Sym } from '@/lib/market';
+import { outlookName, useHourly, withHourly } from '@/components/picks/score';
+import { useQuote } from '@/hooks/market';
+import { MARKETS, predictSummary, predictSymbol, split, type Market, type OutlookCheck, type OutlookGrade, type OutlookItem, type Sym } from '@/lib/market';
 import { isNewUpbitListing, listingStudy } from '@/lib/newsTag';
 import { cn } from '@/lib/utils';
 
@@ -20,6 +22,12 @@ const DIR = (x: number) => (Math.round(x * 1000) > 0 ? 'text-up-text' : Math.rou
 const dayLabel = (s: string | undefined) => {
   const m = s?.match(/^\d{4}-(\d{2})-(\d{2})/);
   return m ? `${+m[1]}월 ${+m[2]}일` : '';
+};
+const pad = (n: number) => String(n).padStart(2, '0');
+/** ISO → 'HH:MM' (이 기기 시각) */
+const hhmm = (s: string | undefined) => {
+  const d = s ? new Date(s) : null;
+  return d && !Number.isNaN(+d) ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : '';
 };
 
 // 검증 등급 — 과거 시점으로 되돌려 확인했을 때 오를지 내릴지를 아무 날이나 고른 것보다 잘 맞혔는가
@@ -67,7 +75,9 @@ function Band({ q10, q50, q90, dim, scale }: { q10: number; q50: number; q90: nu
   );
 }
 
-function OutlookRow({ o, unit, scale }: { o: OutlookItem; unit: string; scale: Scale }) {
+function OutlookRow({ o, coin, scale, next, closed }: { o: OutlookItem; coin: boolean; scale: Scale; next?: string; closed?: boolean }) {
+  const name = outlookName(o, coin);
+  const hourly = o.unit === 'h';
   const ok = o.q10 != null && o.q50 != null && o.q90 != null;
   const dim = o.grade === 'poor';
   // '참고 낮음'은 방향 색 없이 회색 글자로 (회색도 카드 위 4.5:1 이상)
@@ -75,16 +85,19 @@ function OutlookRow({ o, unit, scale }: { o: OutlookItem; unit: string; scale: S
   return (
     <li className="py-4 first:pt-0 last:pb-0">
       <div className="flex min-w-0 items-center gap-2">
-        <h3 className="text-[16px] font-bold">{o.label}</h3>
-        <span className="text-[13px] text-muted-foreground tabular">
-          {o.h}{unit} 뒤{ok && o.n ? <span className="max-[359px]:hidden"> · 과거 {o.n}번</span> : null}
+        <h3 className="text-[16px] font-bold">{name}</h3>
+        <span className="min-w-0 truncate text-[13px] text-muted-foreground tabular">
+          {hourly && (closed || next) ? `${closed ? '다음 장 첫 봉' : `다음 봉 ${next}`}${ok && o.n ? ' · ' : ''}` : ''}{ok && o.n ? <span className={cn(hourly && (closed || next) && 'max-[359px]:hidden')}>과거 {o.n}번</span> : null}
         </span>
         <GradeTag grade={o.grade} className="ml-auto" />
       </div>
+      {hourly && closed ? (
+        <p className="mt-1.5 text-[12.5px] leading-[1.5] break-keep text-muted-foreground">지금은 장이 닫혀 있어요 — 다음 1시간은 다음 장 첫 봉이라 밤사이 움직임(갭)까지 들어 있어요.</p>
+      ) : null}
       {!ok ? (
         <p className="mt-1.5 text-[13.5px] leading-[1.5] break-keep text-muted-foreground">{o.reason || '비교할 과거 자리가 부족해 계산하지 못했어요.'}</p>
       ) : (
-        <div role="group" aria-label={`${o.label} ${o.h}${unit} 뒤 — 보통 ${pct(o.q10!)} ~ ${pct(o.q90!)}, 중앙값 ${pct(o.q50!)}`}>
+        <div role="group" aria-label={`${name} 뒤 — 보통 ${pct(o.q10!)} ~ ${pct(o.q90!)}, 중앙값 ${pct(o.q50!)}`}>
           <div className="mt-2 flex items-end justify-between gap-3">
             <p className="min-w-0 text-[13.5px] leading-5 text-muted-foreground">
               보통 <span className={cn('font-semibold tabular whitespace-nowrap', dim ? 'text-muted-foreground' : 'text-foreground')}>
@@ -110,8 +123,11 @@ function OutlookRow({ o, unit, scale }: { o: OutlookItem; unit: string; scale: S
 }
 
 /** 되돌려 확인한 결과 한 줄 — 실제 결과가 '보통 범위'(10번 중 8번 목표) 안에 든 비율 */
-function Verify({ checks, items }: { checks: Partial<Record<string, OutlookCheck | null>> | undefined; items: OutlookItem[] }) {
-  const rows = items.flatMap((o) => { const c = checks?.[o.label]; return c && Number.isFinite(c.coverage) ? [{ o, c }] : []; });
+function Verify({ checks, items, coin, hourlyCheck }: { checks: Partial<Record<string, OutlookCheck | null>> | undefined; items: OutlookItem[]; coin: boolean; hourlyCheck?: OutlookCheck | null }) {
+  const rows = items.flatMap((o) => {
+    const c = (o.unit === 'h' && hourlyCheck) || checks?.[o.label];
+    return c && Number.isFinite(c.coverage) ? [{ o, c, name: outlookName(o, coin) }] : [];
+  });
   if (!rows.length) return null;
   const ps = rows.map((r) => r.c.periods || 0).filter((x) => x > 0);
   const periods = !ps.length ? '' : Math.min(...ps) === Math.max(...ps) ? `${ps[0]}번` : `${Math.min(...ps)}~${Math.max(...ps)}번`;
@@ -119,9 +135,9 @@ function Verify({ checks, items }: { checks: Partial<Record<string, OutlookCheck
     <div className="mt-4 rounded-[14px] bg-tile px-3.5 py-3 text-[12.5px] leading-[1.6] break-keep text-secondary-foreground">
       <p>
         <b className="font-semibold">과거로 되돌려 확인했어요.</b>{periods ? ` 과거 ${periods}의 시점에서 이 방식으로 범위를 냈다면,` : ''} 실제 결과가 범위 안에 든 비율은{' '}
-        {rows.map(({ o, c }, i) => (
-          <span key={o.label} className="whitespace-nowrap" title={`${o.label}: 오를지 내릴지 맞힌 비율 ${pct0(c.dirHit)} (늘 많이 나온 쪽으로 찍었을 때 ${pct0(c.baseDirHit)}) · 확인 ${c.n.toLocaleString('ko-KR')}건`}>
-            {o.label} <b className="font-semibold tabular">{pct0(c.coverage)}</b>{i < rows.length - 1 ? ' · ' : ''}
+        {rows.map(({ o, c, name }, i) => (
+          <span key={o.label} className="whitespace-nowrap" title={`${name}: 오를지 내릴지 맞힌 비율 ${pct0(c.dirHit)} (늘 많이 나온 쪽으로 찍었을 때 ${pct0(c.baseDirHit)}) · 확인 ${c.n.toLocaleString('ko-KR')}건`}>
+            {name} <b className="font-semibold tabular">{pct0(c.coverage)}</b>{i < rows.length - 1 ? ' · ' : ''}
           </span>
         ))}
         였어요 <span className="whitespace-nowrap text-muted-foreground">(목표 80%)</span>.
@@ -135,13 +151,17 @@ function Verify({ checks, items }: { checks: Partial<Record<string, OutlookCheck
 
 export function OutlookCard({ sym, market, className }: { sym: Sym; market: Market; className?: string }) {
   const coin = MARKETS[market].coin;
-  const unit = coin ? '일' : '거래일';
   const base = coin ? coinBase(sym) : null;
   const st = useNewsState(coin);
   const newListing = coin && isNewUpbitListing(st.data, base) ? listingStudy(st.data) : null;
   const sum = useQuery({ queryKey: ['predict-summary'], queryFn: predictSummary, staleTime: 10 * 60e3, retry: false });
   const one = useQuery({ queryKey: ['predict', sym], queryFn: () => predictSymbol(sym), staleTime: 10 * 60e3, retry: false });
-  const items = one.data?.outlook?.filter((o) => o && o.label) ?? [];
+  const hr = useHourly(one.data?.outlook?.length ? market : null).data;
+  const q = useQuote(sym);
+  const items: OutlookItem[] = withHourly(one.data?.outlook?.filter((o) => o && o.label) ?? [], hr, split(sym)[1]);
+  const next = hr ? hhmm(hr.nextBarAt) : '';
+  // 주식 장 마감: 네이버 장 상태가 OPEN 이 아니면 (상태를 모르면 1시간 파일이 다음 봉 시각을 한참 지났는지로)
+  const closed = !coin && (q?.status ? q.status !== 'OPEN' : !!hr && Date.now() - Date.parse(hr.nextBarAt) > 90 * 60e3);
 
   if (one.isLoading) {
     return (
@@ -171,9 +191,9 @@ export function OutlookCard({ sym, market, className }: { sym: Sym; market: Mark
             <span className="inline-flex items-center gap-1.5"><span aria-hidden className="size-2.5 rounded-full bg-foreground" />중앙값</span>
           </p>
           <ul className="divide-y divide-border">
-            {items.map((o) => <OutlookRow key={o.label} o={o} unit={unit} scale={scale} />)}
+            {items.map((o) => <OutlookRow key={o.label} o={o} coin={coin} scale={scale} next={next} closed={closed} />)}
           </ul>
-          <Verify checks={sum.data?.outlookBacktest?.[market]} items={items} />
+          <Verify checks={sum.data?.outlookBacktest?.[market]} items={items} coin={coin} hourlyCheck={hr?.backtest} />
           <p className="mt-3 text-[12px] leading-[1.55] break-keep text-muted-foreground">
             과거 비슷한 자리에서 실제로 어땠는지 보여 드리는 거예요. 앞으로도 그렇다는 보장은 없으니 참고만 해 주세요.
           </p>

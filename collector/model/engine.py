@@ -480,3 +480,107 @@ def contributions(models, X, ic, sigma):
 
 def date_starts(ti, T):
     return np.searchsorted(ti, np.arange(T + 1))
+
+
+# ── 근거 있는 점수: 점수 구간별 '실제 결과' 표 (검증 구간 예측만 사용) ───────────────────────────
+N_BINS = 10
+GRADE_W = {"strong": 1.0, "weak": 0.5}  # 검증 등급만큼 '시장 이길 확률'·예상 초과수익을 기준(0.5·0)쪽으로 줄인다
+
+
+def _pav(y, w):
+    """가중 단조 증가 회귀 (pool-adjacent-violators)"""
+    blocks = [[float(v), float(x), 1] for v, x in zip(y, w)]
+    i = 0
+    while i < len(blocks) - 1:
+        if blocks[i][0] > blocks[i + 1][0]:
+            a, b = blocks[i], blocks[i + 1]
+            tw = a[1] + b[1]
+            blocks[i] = [(a[0] * a[1] + b[0] * b[1]) / tw if tw else 0.0, tw, a[2] + b[2]]
+            del blocks[i + 1]
+            i = max(0, i - 1)
+        else:
+            i += 1
+    out = []
+    for v, _, n in blocks:
+        out += [v] * n
+    return out
+
+
+def _bin_table(pct, ex):
+    b = np.clip((pct * N_BINS).astype(int), 0, N_BINS - 1)
+    rows = []
+    for i in range(N_BINS):
+        e = ex[b == i]
+        if len(e) < 30:
+            rows.append(None)
+            continue
+        q10, q50, q90 = np.quantile(e, [0.1, 0.5, 0.9])
+        rows.append({"n": int(len(e)), "hit": float((e > 0).mean()), "q10": float(q10), "q50": float(q50),
+                     "q90": float(q90), "mean": float(e.mean())})
+    return rows
+
+
+def _smooth(rows):
+    ok = [r for r in rows if r]
+    if len(ok) < N_BINS:
+        return rows
+    for k in ("hit", "q50"):
+        sm = _pav([r[k] for r in rows], [r["n"] for r in rows])
+        for r, v in zip(rows, sm):
+            r[k + "Raw"] = r[k]
+            r[k] = v
+    return rows
+
+
+def score_bins(ds, score, pl, dev_frac=0.7):
+    """백분위 10구간별 실제 초과수익(같은 날 유니버스 중앙값 대비) 표.
+    ① 앞 70% 검증일로 표를 만들고 뒤 30%(보류)에서 신뢰도(예측 확률 vs 실제 적중)를 잰다 — 정직한 확인
+    ② 공개용 표는 검증 구간 전체로 다시 만든다(단조 보정). 반환 None = 검증 표본 부족."""
+    a, b = pl["first_test"], pl["last_lab"]
+    ok = np.isfinite(score) & np.isfinite(ds["excess"]) & (ds["ti"] >= a) & (ds["ti"] <= b)
+    if ok.sum() < 3000:
+        return None
+    pct = xs_pct(ds, np.where(ok, score, np.nan))
+    h0 = a + int((b - a) * dev_frac)
+    H = ds["H"]
+    dev = ok & (ds["ti"] <= h0 - H)
+    hold = ok & (ds["ti"] >= h0)
+    rel = None
+    if dev.sum() >= 2000 and hold.sum() >= 1000:
+        tab = _smooth(_bin_table(pct[dev], ds["excess"][dev]))
+        if all(tab):
+            bh = np.clip((pct[hold] * N_BINS).astype(int), 0, N_BINS - 1)
+            eh = ds["excess"][hold]
+            rel = []
+            err = 0.0
+            for i in range(N_BINS):
+                sel = bh == i
+                act = float((eh[sel] > 0).mean()) if sel.any() else None
+                rel.append({"bin": i, "pred": tab[i]["hit"], "actual": act, "n": int(sel.sum()),
+                            "predQ50": tab[i]["q50"], "actualQ50": float(np.median(eh[sel])) if sel.any() else None})
+                if act is not None:
+                    err += abs(act - tab[i]["hit"]) * sel.sum()
+            top = bh == N_BINS - 1
+            rel = {"from": str(ds["dates"][h0].date()), "to": str(ds["dates"][b].date()), "bins": rel,
+                   "calibErr": float(err / max(1, len(bh))),
+                   "topHit": float((eh[top] > 0).mean()) if top.any() else None,
+                   "topPredHit": tab[-1]["hit"]}
+    full = _smooth(_bin_table(pct[ok], ds["excess"][ok]))
+    if not all(full):
+        return None
+    return {"bins": full, "reliability": rel, "n": int(ok.sum()),
+            "from": str(ds["dates"][a].date()), "to": str(ds["dates"][b].date())}
+
+
+def grounded(bins, pct, verdict):
+    """오늘 백분위 → {probBeat, expEx{q10,q50,q90}, score, conf}. 등급 none 이면 None (판단 보류)"""
+    if not bins or verdict not in GRADE_W:
+        return None
+    w = GRADE_W[verdict]
+    i = int(np.clip(int(pct * N_BINS), 0, N_BINS - 1))
+    r = bins["bins"][i]
+    p = 0.5 + (r["hit"] - 0.5) * w
+    shift = r["q50"] * w - r["q50"]
+    return {"probBeat": p, "probRaw": r["hit"], "bin": i, "conf": w,
+            "expEx": {"q10": r["q10"] + shift, "q50": r["q50"] * w, "q90": r["q90"] + shift, "n": r["n"]},
+            "score": round(100 * p, 1)}

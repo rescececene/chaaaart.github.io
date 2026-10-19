@@ -8,6 +8,7 @@ import { href } from '@/lib/router';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AiRange } from '@/components/common/RangeBar';
 import { minus } from '@/components/common/Change';
+import { beatProb, dayUnit, GradeBadge, topText } from '@/components/picks/score';
 
 const DIR = (x: number) => (x > 0 ? 'text-up-text' : x < 0 ? 'text-down-text' : 'text-foreground');
 /** 분수 → '+3.4%' · '−0.6%' (U+2212) */
@@ -74,23 +75,35 @@ export function ForecastPanel({ sym, market }: { sym: Sym; market: Market }) {
     );
   }
   const d = one.data, bt = m?.backtest;
-  const unit = MARKETS[market].coin ? '일' : '거래일';
+  const unit = dayUnit(market);
+  const prob = beatProb(d);
+  const top = topText(d.pctRank);
   return (
     <div>
-      <div className="flex items-center justify-between gap-4">
+      {/* 큰 숫자는 '시장 이길 확률' — 가격이 오를 확률이 아니다. 근거가 부족하면 판단 보류 */}
+      <div className="flex items-end justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-[30px] leading-9 font-bold tracking-[-0.03em] tabular md:text-[34px] md:leading-10">{Math.round(d.score)}<small className="ml-0.5 text-[17px] font-semibold text-text-3">점</small></div>
-          <div className="text-[13px] text-muted-foreground">{MARKETS[market].name} {d.of}종목 중 {d.rank}위</div>
-        </div>
-        {d.probUp != null && (
-          <div className="flex shrink-0 flex-col items-end rounded-[14px] bg-tile px-3 py-2 text-right sm:px-3.5 sm:py-2.5" title={`${d.horizon}${unit} 뒤 시장 중앙값보다 오를 확률`}>
-            <span className="text-[13px] whitespace-nowrap text-muted-foreground">시장보다 나을 확률</span>
-            <b className="text-[20px] leading-7 font-bold tabular sm:text-[22px]">{Math.round(d.probUp * 100)}%</b>
+          <div className="text-[13px] text-muted-foreground" title={`${d.horizon}${unit} 동안 같은 시장 종목들의 중앙값보다 더 오를 확률 — 가격이 오를 확률이 아니에요`}>시장 이길 확률 · {d.horizon}{unit}</div>
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            {prob != null
+              ? <b className="text-[30px] leading-9 font-bold tracking-[-0.03em] tabular md:text-[34px] md:leading-10">{Math.round(prob * 100)}%</b>
+              : <b className="text-[24px] leading-9 font-bold text-muted-foreground md:leading-10">판단 보류</b>}
+            <GradeBadge grade={d.grade ?? m?.grade} />
           </div>
-        )}
+          <div className="text-[13px] text-muted-foreground tabular">{top ? `${top} · ` : ''}{MARKETS[market].name} {d.of}종목 중 {d.rank}위</div>
+        </div>
       </div>
+      {d.hold ? (
+        <p className="mt-3 rounded-[14px] bg-tile px-3.5 py-3 text-[13px] leading-[1.55] break-keep text-muted-foreground">
+          이 종목은 과거 검증에서 같은 점수 구간의 결과가 고르지 않아 이번엔 ‘시장을 이길지’ 판단을 보류했어요. 아래 이유와 범위만 참고해 주세요.
+        </p>
+      ) : null}
+      {d.expEx ? (
+        <AiRange className="mt-[18px]" q10={d.expEx.q10} q50={d.expEx.q50} q90={d.expEx.q90}
+          label={<span title={`과거 같은 점수 구간 ${d.expEx.n.toLocaleString('ko-KR')}건이 실제로 낸 시장 대비 초과수익`}>{d.horizon}{unit} 동안 시장 대비 예상 (10번 중 8번)</span>} />
+      ) : null}
       {d.q10 != null && d.q50 != null && d.q90 != null && (
-        <AiRange className="mt-[18px]" q10={d.q10} q50={d.q50} q90={d.q90} label={`${d.horizon}${unit} 뒤 수익률 예상 범위 (10~90%)`} />
+        <AiRange className="mt-4" q10={d.q10} q50={d.q50} q90={d.q90} label={`${d.horizon}${unit} 뒤 가격 자체 예상 범위`} />
       )}
       {d.reasons.length > 0 && (
         <>
@@ -120,7 +133,7 @@ export function ForecastPanel({ sym, market }: { sym: Sym; market: Market }) {
               순위 상관(IC) <b className="tabular">{bt.rankIC == null ? '–' : bt.rankIC.toFixed(3)}</b>
             </p>
             {m?.notes?.length ? <ul className="mt-2 list-disc space-y-0.5 pl-4 text-muted-foreground">{m.notes.slice(0, 3).map((x, i) => <li key={i}>{x}</li>)}</ul> : null}
-            <p className="mt-2 text-muted-foreground">{d.asOf} 기준 · 과거 성과가 미래 수익을 보장하지 않아요. 참고용으로만 보세요.</p>
+            <p className="mt-2 text-muted-foreground">‘시장 이길 확률’은 과거 같은 점수 구간 종목들이 실제로 시장 중앙값을 이긴 비율을 검증 등급만큼 50% 쪽으로 줄인 값이에요. {d.asOf} 기준 · 과거 성과가 미래 수익을 보장하지 않아요. 참고용으로만 보세요.</p>
           </div>
         </details>
       )}

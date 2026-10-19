@@ -3,13 +3,13 @@
 import { useSyncExternalStore } from 'react';
 
 export interface Route { page: string; args: string[] }
-const PAGES = ['market', 'picks', 'chart', 'screener', 'news', 'settings'] as const;
+const PAGES = ['recommend', 'market', 'picks', 'chart', 'screener', 'news', 'settings'] as const;
 export type PageKey = (typeof PAGES)[number];
 
 function parse(): Route {
   const h = location.hash.replace(/^#\/?/, '');
   const parts = h.split('/').filter(Boolean).map((s) => { try { return decodeURIComponent(s); } catch { return s; } });
-  const page = (PAGES as readonly string[]).includes(parts[0]) ? parts[0] : 'market';
+  const page = (PAGES as readonly string[]).includes(parts[0]) ? parts[0] : 'recommend';
   return { page, args: parts.slice(1) };
 }
 let current = parse();

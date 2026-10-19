@@ -58,6 +58,9 @@ def due(markets, summary, hours, retry_hours, now_ts):
         if age is None:
             out.append((m, "결과 없음"))
             continue
+        if "scoreBins" not in r:  # 결과 형식이 바뀌었다 (근거 있는 점수 도입 전 결과) — 바로 다시
+            out.append((m, "결과 형식 바뀜"))
+            continue
         if age >= hours:
             out.append((m, f"학습 {age:.1f}시간 전"))
             continue

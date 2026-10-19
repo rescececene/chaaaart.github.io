@@ -14,14 +14,14 @@ import { LiveBadge } from '@/components/common/Status';
 import { SearchCommand } from './SearchCommand';
 
 export const NAV: [PageKey, string][] = [
-  ['market', '시장'], ['picks', '유망 종목'], ['chart', '차트'], ['screener', '종목 골라보기'], ['news', '뉴스'],
+  ['recommend', '추천'], ['market', '시장'], ['picks', '유망 종목'], ['chart', '차트'], ['screener', '종목 골라보기'], ['news', '뉴스'],
 ];
 const MAX_W = 'mx-auto max-w-[1248px]';
 
 /** 사이트 이름 — 마크 없이 굵은 글자만 */
 function Logo() {
   return (
-    <a href={href('market')} aria-label="마켓 — 시장 첫 화면" className="flex h-10 shrink-0 items-center text-[21px] leading-none font-extrabold tracking-[-0.05em] text-foreground">
+    <a href={href('recommend')} aria-label="마켓 — 첫 화면(추천)" className="flex h-10 shrink-0 items-center text-[21px] leading-none font-extrabold tracking-[-0.05em] text-foreground">
       마켓
     </a>
   );
@@ -107,16 +107,16 @@ export function Header() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
   const nav = (mobile: boolean) => (
-    <nav aria-label="메뉴" className={cn('no-scrollbar flex overflow-x-auto', mobile ? 'h-11 justify-between px-1.5 min-[380px]:px-2.5' : 'h-16 self-stretch')}>
+    <nav aria-label="메뉴" className={cn('no-scrollbar flex overflow-x-auto', mobile ? 'h-11 justify-between px-1 min-[420px]:px-2.5' : 'h-16 self-stretch')}>
       {NAV.map(([page, label]) => {
         const on = route.page === page;
         return (
           <a key={page} href={href(page)} aria-current={on ? 'page' : undefined}
             className={cn('relative flex shrink-0 items-center whitespace-nowrap transition-colors',
-              mobile ? 'px-2 text-[14.5px] min-[380px]:px-2.5 min-[380px]:text-[15px]' : 'px-[13px] text-[16px]',
+              mobile ? 'px-1.5 text-[14px] min-[420px]:px-2.5 min-[420px]:text-[15px]' : 'px-[13px] text-[16px]',
               on ? 'font-bold text-foreground' : 'font-semibold text-muted-foreground hover:text-secondary-foreground')}>
             {label}{page === 'picks' && <AI />}
-            {on && <motion.span layoutId={mobile ? 'nav-m' : 'nav-d'} className={cn('absolute bottom-0 h-[2px] rounded-t-[2px] bg-foreground', mobile ? 'inset-x-2 min-[380px]:inset-x-2.5' : 'inset-x-[13px]')} transition={{ type: 'spring', stiffness: 520, damping: 40 }} />}
+            {on && <motion.span layoutId={mobile ? 'nav-m' : 'nav-d'} className={cn('absolute bottom-0 h-[2px] rounded-t-[2px] bg-foreground', mobile ? 'inset-x-1.5 min-[420px]:inset-x-2.5' : 'inset-x-[13px]')} transition={{ type: 'spring', stiffness: 520, damping: 40 }} />}
           </a>
         );
       })}

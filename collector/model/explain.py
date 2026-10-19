@@ -1,9 +1,9 @@
 """예측 근거 → 한국어 문장. 문장 속 숫자는 그날 실제 특징 값·시장 내 백분위 그대로 쓴다."""
 import math
 
-from features import FEATURES, MOM_WIN, REGIME, W52
+from features import EXTRA, EXTRA_REGIME, FEATURES, MOM_WIN, REGIME, W52
 
-LABELS = {**{k: v[0] for k, v in FEATURES.items()}, **{k: v[0] for k, v in REGIME.items()}}
+LABELS = {k: v[0] for d in (FEATURES, REGIME, EXTRA, EXTRA_REGIME) for k, v in d.items()}
 COIN = ("upbit", "binance")
 
 
@@ -51,7 +51,14 @@ def _with_loss_pos(text, pct, noun):
     return f"{text} ({noun} 큰 쪽 {max(1, round(pct * 100))}%)"
 
 
-def sentence(key, v, pct, market, hist=None):
+def _won(x, market):
+    """거래대금 → 읽기 쉬운 금액"""
+    if market in ("krx", "upbit"):
+        return f"{x / 1e8:,.0f}억 원" if x >= 1e8 else f"{x / 1e4:,.0f}만 원"
+    return f"${x / 1e6:,.1f}M" if x >= 1e6 else f"${x / 1e3:,.0f}K"
+
+
+def sentence(key, v, pct, market, hist=None, mkt=None):
     """key 특징의 값 v, 시장 내 백분위 pct → 문장. 값이 없으면 None.
     hist: 최근 52주 창 안에 실제로 있는 봉 수 (짧으면 '52주' 대신 '상장(재개) 후 n일')"""
     if v is None or not math.isfinite(v):
@@ -59,7 +66,13 @@ def sentence(key, v, pct, market, hist=None):
     short = hist is not None and hist < W52[market] - 5
     span = f"상장(재개) 후 {hist}{_unit(market)}" if short else "52주"
     if key.startswith("ret_"):
-        return _with_pos(f"{key[4:]}일 수익률 {_p(v)}", pct)
+        n = key[4:]
+        med = (mkt or {}).get(key)
+        if med is not None and math.isfinite(med) and n != "1":
+            d = v - med
+            word = "강함" if d > 0 else "약함"
+            return _with_pos(f"최근 {n}{_unit(market)} {_p(v)} — 시장(중앙값 {_p(med)})보다 {d * 100:+.1f}%p {word}", pct)
+        return _with_pos(f"{'어제 하루' if n == '1' else f'최근 {n}{_unit(market)}'} 수익률 {_p(v)}", pct)
     if key == "mom_12_1":
         skip, year = MOM_WIN[market]
         if market in COIN:
@@ -139,6 +152,19 @@ def sentence(key, v, pct, market, hist=None):
         return f"{key[3:]}일 상대강도: 시장 중앙값보다 {v * 100:+.1f}%p"
     if key == "age":
         return f"상장 {v:.0f}일째 (신규 상장)" if v < 365 else "상장 1년 이상"
+    if key == "kp_rel":
+        return _with_pos(f"김치 프리미엄이 다른 코인 평균보다 {v * 100:+.1f}%p {'높음' if v > 0 else '낮음'}", pct)
+    if key == "kp_chg5":
+        return _with_pos(f"김치 프리미엄이 5일 새 {v * 100:+.1f}%p {'커짐' if v > 0 else '줄어듦'}", pct)
+    if key == "dv_20":
+        return _with_pos(f"20일 평균 거래대금 {_won(math.exp(v), market)}", pct)
+    if key == "dv_trend":
+        return _with_pos(f"최근 5일 거래대금이 60일 평균의 {v:.1f}배", pct)
+    if key == "amihud_20":
+        return _with_pos("적은 거래에도 가격이 크게 움직이는 편(비유동성)" if (pct or 0) >= 0.5
+                         else "거래가 많아 가격 충격이 작은 편(유동성 좋음)", pct)
+    if key == "btc_ret_20":
+        return f"비트코인 20일 수익률 {_p(v)}"
     if key == "mkt_ret_20":
         return f"시장 전체 20일 수익률 {_p(v)} (중앙값)"
     if key == "mkt_ret_60":
@@ -159,7 +185,7 @@ def tone(z, top_abs):
     return "up" if z > 0 else "down"
 
 
-def build(items, market, n_reasons=4, n_contrib=8, hist=None):
+def build(items, market, n_reasons=4, n_contrib=8, hist=None, mkt=None):
     """items: [(key, value, pct, impact, z)] — impact: 초과수익 단위 기여, z: 모형 점수(표준화) 기여
     기여 순서·방향은 z 로 정한다(검증 IC 가 0 이하라 impact 가 0 이어도 모형이 왜 그 순위를 줬는지는 보이게)."""
     items = [x for x in items if x[1] is not None and math.isfinite(x[1]) and math.isfinite(x[4])]
@@ -169,7 +195,7 @@ def build(items, market, n_reasons=4, n_contrib=8, hist=None):
     top_abs = abs(items[0][4]) if items else 0.0
     reasons = []
     for k, v, pct, _, z in items:
-        s = sentence(k, v, pct, market, hist)
+        s = sentence(k, v, pct, market, hist, mkt)
         if not s:
             continue
         reasons.append({"text": s, "tone": tone(z, top_abs)})
