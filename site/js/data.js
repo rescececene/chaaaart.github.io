@@ -617,17 +617,46 @@
 
   // ── 뉴스 ──────────────────────────────────────────────
   const topicNews = () => staticJSON('news.json', 5 * 60e3);
-  async function symbolNews(query) {
-    const xml = await Relay.text('gnews', '', { q: query + ' when:7d', hl: 'ko', gl: 'KR', ceid: 'KR:ko' });
-    const doc = new DOMParser().parseFromString(xml, 'text/xml');
-    return [...doc.querySelectorAll('item')].slice(0, 30).map((it) => {
-      const src = (it.querySelector('source') || {}).textContent || '';
-      let title = (it.querySelector('title') || {}).textContent || '';
-      if (src && title.endsWith(' - ' + src)) title = title.slice(0, -src.length - 3);
-      return { title, src, url: (it.querySelector('link') || {}).textContent, ts: Date.parse((it.querySelector('pubDate') || {}).textContent) / 1000 };
-    });
+  const unescapeHtml = (s) => { const t = document.createElement('textarea'); t.innerHTML = s || ''; return t.value; };
+  const kstTs = (s) => ymdTs(s) - 9 * 3600; // 네이버 뉴스 시각(한국 시간) → 실제 epoch 초
+  // 종목 뉴스 — 주식은 네이버 증권(중계 필요), 코인은 GitHub Actions 가 모은 코인 뉴스에서 이름으로 골라낸다.
+  // (구글 뉴스는 Cloudflare 서버 요청을 봇으로 막아서 중계로는 못 쓴다)
+  async function symbolNews(sym) {
+    const seen = new Set(), raw = await symbolNewsRaw(sym);
+    const out = raw.filter((x) => x.title && !seen.has(x.title) && seen.add(x.title)); // 같은 제목은 하나만
+    out.general = raw.general;
+    return out;
+  }
+  async function symbolNewsRaw(sym) {
+    const [market, code] = split(sym);
+    if (market === 'krx') {
+      const d = await Relay.json('naver-m', `news/stock/${code}`, { pageSize: 20, page: 1 });
+      return d.flatMap((c) => c.items || []).map((x) => ({
+        title: unescapeHtml(x.titleFull || x.title), src: x.officeName, ts: kstTs(x.datetime),
+        url: x.mobileNewsUrl || `https://n.news.naver.com/mnews/article/${x.officeId}/${x.articleId}`,
+      }));
+    }
+    if (market === 'us') {
+      const d = await Relay.json('naver-api', `news/worldStock/${code}`, { pageSize: 20, page: 1 });
+      return d.map((x) => ({ title: unescapeHtml(x.tit), src: x.ohnm, ts: kstTs(x.dt), url: `https://m.stock.naver.com/worldstock/stock/${code}/news` }));
+    }
+    const t = await topicNews();
+    const items = ((t.topics || []).find((x) => x.key === 'coin') || { items: [] }).items;
+    const n = nameOf(sym), base = n.sub.split('/')[0];
+    const words = [...n.name.split(/[()]/), base].map((w) => w.trim()).filter((w) => w.length >= 2);
+    const hit = items.filter((x) => words.some((w) => x.title.toUpperCase().includes(w.toUpperCase())));
+    if (hit.length >= 2) return hit;
+    const general = items.slice(0, 10);
+    general.general = true; // 이 코인만의 뉴스가 부족하면 코인 주요 뉴스로
+    return general;
   }
   const googleNewsUrl = (query) => 'https://news.google.com/search?' + new URLSearchParams({ q: query, hl: 'ko', gl: 'KR', ceid: 'KR:ko' });
+  function newsMoreUrl(sym) {
+    const [market, code] = split(sym);
+    if (market === 'krx') return `https://m.stock.naver.com/domestic/stock/${code}/news`;
+    if (market === 'us') return `https://m.stock.naver.com/worldstock/stock/${code}/news`;
+    return googleNewsUrl(nameOf(sym).name + ' 코인');
+  }
 
   const screener = (market) => staticJSON(`screener/${market}.json`, 3 * 60e3);
   const meta = () => staticJSON('meta.json', 3 * 60e3);
@@ -636,7 +665,7 @@
     MARKETS, INTERVALS, IV_SEC, DAILY, Store, Relay, Names, Quotes, FX, NeedRelay, listOrder,
     split, marketOf, nameOf, remember, loadCoins, upbitCodes, binanceTop,
     onQuotes, want, unwant, overview, usdtKrw, kimp, refreshKimpRef,
-    candles, search, topicNews, symbolNews, googleNewsUrl, screener, meta, loadStaticStocks,
+    candles, search, topicNews, symbolNews, googleNewsUrl, newsMoreUrl, screener, meta, loadStaticStocks,
     stockError: () => StockLive.lastError,
   };
 })(window);

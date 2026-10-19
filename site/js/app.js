@@ -681,25 +681,23 @@
         ${this.newsCard()}`;
     },
     newsCard() {
-      const n = D.nameOf(this.sym), q = this.newsQuery();
+      const n = D.nameOf(this.sym), coin = MARKETS[D.marketOf(this.sym)].coin;
       const items = this.news.items;
       let body;
-      if (!Relay.ok()) body = '<p class="note">종목 뉴스는 실시간 중계 연결 후 여기에 표시됩니다.</p>';
+      if (!coin && !Relay.ok()) body = '<p class="note">종목 뉴스는 실시간 중계 연결 후 여기에 표시됩니다.</p>';
       else if (!items) body = '<p class="note"><span class="spinner"></span> 불러오는 중…</p>';
-      else if (!items.length) body = '<p class="note">최근 7일 뉴스가 없습니다.</p>';
+      else if (!items.length) body = '<p class="note">최근 뉴스가 없습니다.</p>';
       else body = `<ul class="news-list">${items.slice(0, 8).map((x) => `<li><a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a><div class="meta">${esc(x.src)} · ${timeAgo(x.ts * 1000)}</div></li>`).join('')}</ul>`;
-      return `<div class="card"><div class="card-head"><h2>${esc(n.name)} 뉴스</h2><a class="small muted" href="${D.googleNewsUrl(q)}" target="_blank" rel="noopener">더보기 ↗</a></div>${body}</div>`;
-    },
-    newsQuery() {
-      const n = D.nameOf(this.sym), m = D.marketOf(this.sym);
-      return MARKETS[m].coin ? `${n.name} 코인` : n.name;
+      const title = items && items.general ? '코인 주요 뉴스' : `${esc(n.name)} 뉴스`;
+      return `<div class="card"><div class="card-head"><h2>${title}</h2><a class="small muted" href="${esc(D.newsMoreUrl(this.sym))}" target="_blank" rel="noopener">더보기 ↗</a></div>${body}</div>`;
     },
     async loadNews() {
-      if (!Relay.ok() || this.news.sym === this.sym) return;
+      const coin = MARKETS[D.marketOf(this.sym)].coin;
+      if ((!coin && !Relay.ok()) || this.news.sym === this.sym) return;
       const sym = this.sym;
       this.news = { sym };
       try {
-        const items = await D.symbolNews(this.newsQuery());
+        const items = await D.symbolNews(sym);
         if (this.sym === sym) { this.news.items = items; this.renderSide(); }
       } catch {
         if (this.sym === sym) { this.news.items = []; this.renderSide(); }
