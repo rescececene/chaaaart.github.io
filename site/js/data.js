@@ -120,6 +120,11 @@
       const base = s.replace(/USDT$/, '');
       remember('binance:' + s, { name: kr[base] || base, sub: base + '/USDT' });
     }
+    // 업비트 웹소켓이 막혀 있어도 빈 화면이 되지 않도록 10분 단위 시세를 먼저 깔아 둔다
+    staticJSON('screener/upbit.json', 5 * 60e3).then((d) => {
+      const ts = Date.parse(d.updatedAt);
+      for (const r of d.rows) if (!Quotes.has(r.sym)) putQuote(r.sym, { price: r.price, chg: r.chg, vol: r.vol, ts, live: false });
+    }).catch(() => {});
     return coinsData;
   }
   const upbitCodes = () => Object.keys((coinsData && coinsData.upbit) || {});
@@ -424,21 +429,34 @@
   }
 
   const UPBIT_PATH = { '15m': 'minutes/15', '1h': 'minutes/60', '4h': 'minutes/240', '1d': 'days', '1w': 'weeks', '1M': 'months' };
+  const UPBIT_BLOCKED = '업비트가 잠시 요청을 막았습니다 — 같은 인터넷에서 여러 기기·탭으로 열면 자주 생깁니다. 실시간 중계(Worker)를 연결하면 해결됩니다.';
   const upbitGate = { next: 0 };
-  async function upbitGet(path) {
+  // 업비트는 브라우저발 요청을 같은 IP 기준 10초에 1번 정도만 받는다.
+  // 넘치면 CORS 헤더 없는 429 를 돌려줘서 브라우저에선 TypeError 로 보인다 → 간격을 두고 세 번까지 시도
+  async function upbitGet(path, onWait) {
     if (Relay.ok()) {
       try { return await Relay.json('upbit', path); } catch (e) { if (e.status !== 429 && e.status !== 502) throw e; }
     }
-    const now = Date.now(), at = Math.max(now, upbitGate.next); // 직접 부를 땐 10.5초에 1번
-    upbitGate.next = at + 10500;
-    if (at > now) await sleep(at - now);
-    return getJSON('https://api.upbit.com/v1/' + path);
+    for (let attempt = 0; ; attempt++) {
+      const now = Date.now(), at = Math.max(now, upbitGate.next);
+      upbitGate.next = at + 10500;
+      if (at > now) {
+        if (onWait) onWait(Math.ceil((at - now) / 1000));
+        await sleep(at - now);
+      }
+      try {
+        return await getJSON('https://api.upbit.com/v1/' + path);
+      } catch (e) {
+        if (e.status && e.status !== 429) throw e;
+        if (attempt >= 2) throw new Error(UPBIT_BLOCKED);
+      }
+    }
   }
-  async function upbitCandles(code, iv) {
+  async function upbitCandles(code, iv, onWait) {
     const pages = Relay.ok() ? 2 : 1;
     let raw = [], to = null;
     for (let p = 0; p < pages; p++) {
-      const page = await upbitGet(`candles/${UPBIT_PATH[iv]}?market=${code}&count=200${to ? '&to=' + encodeURIComponent(to) : ''}`);
+      const page = await upbitGet(`candles/${UPBIT_PATH[iv]}?market=${code}&count=200${to ? '&to=' + encodeURIComponent(to) : ''}`, onWait);
       raw = raw.concat(page);
       if (page.length < 200) break;
       to = page[page.length - 1].candle_date_time_utc.replace('T', ' ');
@@ -478,13 +496,48 @@
     });
     return dedupe(out);
   }
-  async function candles(sym, iv) {
+  // GitHub Actions 가 스크리너를 계산하며 남긴 일봉 (collector/collect.py 의 candle_path 와 같은 규칙)
+  async function staticCandles(sym) {
     const [market, code] = split(sym);
-    if (market === 'upbit') return upbitCandles(code, iv);
+    const d = await staticJSON(`candles/${market}/${code.replace(/[^A-Za-z0-9._-]/g, '_')}.json`, 5 * 60e3);
+    return d.c.map(([t, o, h, l, c, v]) => ({ t, o, h, l, c, v }));
+  }
+  // 일봉 → 주봉(월요일 시작) · 월봉
+  function aggregate(daily, iv) {
+    if (iv === '1d') return daily;
+    const out = [];
+    let cur = null;
+    for (const c of daily) {
+      const d = new Date(c.t * 1000);
+      const key = iv === '1w' ? c.t - ((d.getUTCDay() + 6) % 7) * 86400 : Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000;
+      if (!cur || cur.t !== key) { cur = { ...c, t: key }; out.push(cur); } else {
+        cur.h = Math.max(cur.h, c.h); cur.l = Math.min(cur.l, c.l); cur.c = c.c; cur.v += c.v;
+      }
+    }
+    return out;
+  }
+  // onWait(초): 업비트 제한으로 기다릴 때 화면에 알려 주는 콜백
+  async function candles(sym, iv, onWait) {
+    const [market, code] = split(sym);
     if (market === 'binance') return binanceCandles(code, iv);
-    if (!Relay.ok()) throw new NeedRelay();
-    if (market === 'us' && !DAILY.has(iv)) return yahooCandles(sym, iv);
-    return naverCandles(market, code, iv);
+    if (Relay.ok()) {
+      try {
+        if (market === 'upbit') return await upbitCandles(code, iv, onWait);
+        if (market === 'us' && !DAILY.has(iv)) return await yahooCandles(sym, iv);
+        return await naverCandles(market, code, iv);
+      } catch (e) {
+        if (!DAILY.has(iv)) throw e; // 일봉 이상은 아래 저장된 일봉으로 대신
+      }
+    }
+    if (DAILY.has(iv)) {
+      try {
+        return aggregate(await staticCandles(sym), iv);
+      } catch (e) {
+        if (market !== 'upbit') throw e.status === 404 ? new Error('이 종목은 저장된 일봉이 없습니다 — 실시간 중계(Worker)를 연결하면 볼 수 있습니다') : e;
+      }
+    }
+    if (market === 'upbit') return upbitCandles(code, iv, onWait);
+    throw new NeedRelay();
   }
 
   // ── 검색 ──────────────────────────────────────────────

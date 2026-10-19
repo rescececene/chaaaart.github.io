@@ -449,8 +449,9 @@
         this.load(true);
       }
       clearInterval(this.refreshTimer);
-      const coin = MARKETS[D.marketOf(sym)].coin;
-      this.refreshTimer = setInterval(() => { if (!document.hidden) this.load(false); }, coin && !D.DAILY.has(iv) ? 30e3 : 60e3);
+      // 분봉 새로고침: 바이낸스·중계는 30초, 업비트 직접 호출은 제한 때문에 60초
+      const m = D.marketOf(sym), fast = MARKETS[m].coin && !D.DAILY.has(iv) && (m === 'binance' || Relay.ok());
+      this.refreshTimer = setInterval(() => { if (!document.hidden) this.load(false); }, fast ? 30e3 : 60e3);
     },
     leave() { D.unwant('chart'); clearInterval(this.refreshTimer); },
     msg(html) { const m = $('#cMsg', this.el); m.hidden = !html; if (html) m.innerHTML = `<div>${html}</div>`; },
@@ -477,7 +478,9 @@
       const { sym, iv } = this, token = ++this.loadSeq;
       if (fresh) this.msg('<span class="spinner"></span> 차트 불러오는 중…');
       try {
-        const cs = await D.candles(sym, iv);
+        const cs = await D.candles(sym, iv, (sec) => {
+          if (fresh && token === this.loadSeq) this.msg(`<span class="spinner"></span> 업비트 요청 제한 때문에 ${sec}초 뒤 불러옵니다`);
+        });
         if (token !== this.loadSeq) return;
         if (!cs.length) throw new Error('데이터가 없습니다');
         this.candles = cs;
@@ -491,7 +494,7 @@
       } catch (e) {
         if (token !== this.loadSeq || !fresh) return;
         this.msg(e.needRelay
-          ? '주식 차트는 실시간 중계(Worker)를 연결해야 볼 수 있습니다.<br><br><a class="btn primary" href="#settings">중계 연결하기</a>'
+          ? `주식 분봉은 실시간 중계(Worker)를 연결해야 볼 수 있습니다.<br>일·주·월봉은 지금도 볼 수 있어요.<br><br><a class="btn" href="#chart/${enc(sym)}/1d">일봉 보기</a> <a class="btn primary" href="#settings">중계 연결하기</a>`
           : `차트를 불러오지 못했습니다<br><span class="muted small">${esc(e.message)}</span>`);
         if (e.needRelay) this.loadNews();
       }

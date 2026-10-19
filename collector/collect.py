@@ -10,6 +10,7 @@
 import argparse
 import json
 import math
+import re
 import threading
 import time
 import traceback
@@ -54,6 +55,17 @@ def write(name, obj):
     tmp.replace(path)
 
 
+def candle_path(sym):
+    """site/js/data.js 의 staticCandles() 와 같은 규칙"""
+    market, _, code = sym.partition(":")
+    return f"candles/{market}/{re.sub(r'[^A-Za-z0-9._-]', '_', code)}.json"
+
+
+def write_candles(sym, cs):
+    """일봉을 파일로 남겨 둔다 — 업비트가 브라우저 요청을 막거나 중계(Worker)가 없을 때 차트용"""
+    write(candle_path(sym), {"c": [[c["t"], rnd(c["o"], 10), rnd(c["h"], 10), rnd(c["l"], 10), rnd(c["c"], 10), rnd(c["v"], 6)] for c in cs]})
+
+
 def scan(market, snap, limit):
     rows = sorted(snap.values(), key=lambda q: -((q.get("cap") or q.get("vol")) or 0))
     if market == "binance":
@@ -65,7 +77,10 @@ def scan(market, snap, limit):
     out, fails, t0 = [], 0, time.time()
     for q in rows:
         try:
-            a = indicators.analyze(sources.daily(q["sym"], SCAN_N[market]))
+            cs = sources.daily(q["sym"], SCAN_N[market])
+            a = indicators.analyze(cs)
+            if market != "binance":  # 바이낸스는 브라우저가 직접 받을 수 있다
+                write_candles(q["sym"], cs)
         except Exception as e:
             fails += 1
             if fails <= 3:
