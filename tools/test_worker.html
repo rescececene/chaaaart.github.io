@@ -1,0 +1,47 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Worker 검사</title>
+<pre id="out">실행 중…</pre>
+<script type="module">
+// worker/worker.js 의 허용·차단 규칙 검사 — 원본 서버 호출은 가짜 fetch 로 바꿔 끼운다
+//   py -m http.server 8790 (저장소 최상위) → http://localhost:8790/tools/test_worker.html
+import worker from '../worker/worker.js';
+
+const calls = [];
+window.fetch = async (u) => { calls.push(u); return new Response('{"upstream":true}', { headers: { 'Content-Type': 'application/json' } }); };
+// 브라우저에선 Origin 헤더를 직접 못 넣어서 요청 객체를 흉내 낸다
+const req = (path, origin, method = 'GET') => ({
+  method, url: 'https://market-relay.example.workers.dev' + path,
+  headers: { get: (k) => (k.toLowerCase() === 'origin' ? origin || null : null) },
+});
+const SITE = 'https://rescececene.github.io', EVIL = 'https://evil.example';
+const env = { ACCESS_KEY: 'secret123' };
+const cases = [
+  ['사이트에서 상태 확인', req('/', SITE), env, 200, (r, j) => j.access === true && r.headers.get('Access-Control-Allow-Origin') === SITE],
+  ['다른 사이트에서 상태 확인', req('/', EVIL), env, 200, (r, j) => j.access === false],
+  ['사이트에서 네이버 시세', req('/naver-poll/domestic/stock/005930', SITE), env, 200, () => calls.at(-1) === 'https://polling.finance.naver.com/api/realtime/domestic/stock/005930'],
+  ['다른 사이트에서 네이버 시세', req('/naver-poll/domestic/stock/005930', EVIL), env, 401],
+  ['출처 없이 키 없음', req('/naver-poll/domestic/stock/005930', ''), env, 401],
+  ['출처 없이 맞는 키', req('/upbit/candles/days?market=KRW-BTC&count=2&k=secret123', ''), env, 200, (r) => calls.at(-1) === 'https://api.upbit.com/v1/candles/days?market=KRW-BTC&count=2' && r.headers.get('Access-Control-Allow-Origin') === '*'],
+  ['틀린 키', req('/upbit/ticker?markets=KRW-BTC&k=nope', ''), env, 401],
+  ['키 미설정이면 사이트만', req('/naver-poll/domestic/stock/005930', ''), {}, 401],
+  ['키 미설정 + 사이트', req('/naver-m/stocks/marketValue/KOSPI?page=1', SITE), {}, 200, () => calls.at(-1) === 'https://m.stock.naver.com/api/stocks/marketValue/KOSPI?page=1'],
+  ['검색(경로 없음)', req('/naver-ac?q=%EC%82%BC%EC%84%B1&target=stock', SITE), env, 200, () => calls.at(-1) === 'https://ac.stock.naver.com/ac?q=%EC%82%BC%EC%84%B1&target=stock'],
+  ['모르는 경로', req('/evil/x', SITE), env, 404],
+  ['상위 폴더 접근 (URL 정규화로 /x 가 되어 막힘)', req('/naver-api/../x', SITE), env, 404],
+  ['POST 거부', req('/naver-poll/x', SITE, 'POST'), env, 405],
+  ['허용 사이트 변경', req('/naver-poll/x', 'https://my.site'), { ALLOWED_ORIGINS: 'https://my.site, https://b.site' }, 200],
+];
+const out = [];
+let fails = 0;
+for (const [name, r, e, status, check] of cases) {
+  const res = await worker.fetch(r, e);
+  let j = null;
+  try { j = await res.clone().json(); } catch { /* 본문 없음 */ }
+  const ok = res.status === status && (!check || check(res, j));
+  if (!ok) fails++;
+  out.push(`${ok ? 'OK  ' : 'FAIL'} ${name} → ${res.status}${ok ? '' : ' ' + JSON.stringify(j) + ' last=' + calls.at(-1)}`);
+}
+out.unshift(fails ? `RESULT: ${fails} FAIL` : `RESULT: ALL ${cases.length} OK`);
+document.getElementById('out').textContent = out.join('\n');
+</script>

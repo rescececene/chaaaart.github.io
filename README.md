@@ -15,12 +15,14 @@
 - **관심종목·보유자산·알림**: 각 기기의 브라우저에 저장. 설정 → 백업 코드로 다른 기기에 옮김
 - **알림**: 사이트가 열려 있는 동안 10초마다 검사
 
-## 처음 설정
+## 설정 (완료됨)
 
-1. **GitHub Pages 켜기** — 저장소 Settings → Pages → Source를 **GitHub Actions**로
-2. **Worker 만들기** — 사이트의 설정 화면에 있는 [Worker 만드는 방법] 순서대로 (5분)
-3. 사이트 설정 화면에 Worker 주소와 접근 키를 넣고 [연결 확인]
-4. 휴대폰으로 옮기기 — PC 설정 화면에서 [백업 코드 만들기] → 휴대폰 설정 화면에 붙여넣기
+1. **GitHub Pages** — 저장소 Settings → Pages → Source: **GitHub Actions**
+2. **Worker** — `https://market-relay.get943.workers.dev` 에 `worker/worker.js` 를 배포. 사이트(`site/js/data.js` 의 `DEFAULT_RELAY`)가 이 주소를 기본으로 쓴다.
+   - Worker는 `https://rescececene.github.io` 에서 온 요청(Origin 헤더)만 받으므로 사이트에는 비밀값이 없다. 다른 웹사이트는 브라우저가 Origin을 바꿀 수 없어 이 Worker를 못 쓴다.
+   - Cloudflare의 Secret `ACCESS_KEY` 는 로컬 개발·다른 도구용 예비 수단 (`?k=키`).
+   - `worker/worker.js` 를 고치면 Cloudflare 편집기에 다시 붙여넣고 Deploy 해야 반영된다 (GitHub Actions는 Worker를 배포하지 않음).
+3. 관심종목·보유자산·알림은 기기마다 브라우저에 저장 — 설정 → 백업 코드로 옮긴다.
 
 ## 로컬에서 실행
 

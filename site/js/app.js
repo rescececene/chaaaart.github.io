@@ -1182,33 +1182,32 @@
     el: $('#view-settings'),
     built: false,
     build() {
-      const c = Relay.cfg() || {};
+      const c = Relay.mode() === 'custom' ? Relay.cfg() : {};
       this.el.innerHTML = `
         <div class="two-col">
           <div>
             <div class="card">
-              <div class="card-head"><h2>실시간 중계 (Cloudflare Worker)</h2><span class="small" id="gState"></span></div>
-              <p class="note">주식 실시간 시세·차트·종목 뉴스는 네이버 증권에서 받는데, 다른 사이트에서 바로 부르면 막혀서 중계 서버를 거칩니다. 무료이고 한 번만 만들면 됩니다.</p>
-              <div class="form-grid" style="margin-top:10px">
-                <label class="lbl" style="grid-column:1/-1">Worker 주소<input class="field" id="gUrl" placeholder="https://market-relay.아이디.workers.dev" value="${esc(c.url || '')}" autocapitalize="off" spellcheck="false"></label>
-                <label class="lbl">접근 키 (ACCESS_KEY)<input class="field" id="gKey" type="password" value="${esc(c.key || '')}" autocapitalize="off" spellcheck="false"></label>
-                <div style="display:flex;gap:6px"><button class="btn primary" id="gTest">연결 확인</button><button class="btn" id="gOff">연결 해제</button></div>
-              </div>
+              <div class="card-head"><h2>실시간 중계</h2><span class="small" id="gState"></span></div>
+              <p class="note">주식 실시간 시세·차트·종목 뉴스는 네이버 증권에서 받는데, 다른 사이트에서 바로 부르면 막혀서 이 사이트 전용 중계 서버(Cloudflare Worker)를 거칩니다. 기본으로 연결돼 있어 어느 기기에서든 따로 설정할 필요가 없습니다.</p>
+              <div style="display:flex;gap:6px;margin-top:10px"><button class="btn primary" id="gCheck">지금 연결 확인</button></div>
               <div class="status-line" id="gMsg"></div>
-              <details style="margin-top:12px"><summary class="note" style="cursor:pointer">Worker 만드는 방법 (5분)</summary>
+              <details style="margin-top:12px"><summary class="note" style="cursor:pointer">고급 — 다른 중계 쓰기 · 끄기</summary>
+                <div class="form-grid" style="margin-top:10px">
+                  <label class="lbl" style="grid-column:1/-1">Worker 주소<input class="field" id="gUrl" placeholder="비워 두면 기본 중계" value="${esc(c.url || '')}" autocapitalize="off" spellcheck="false"></label>
+                  <label class="lbl">접근 키 (ACCESS_KEY, 이 사이트에서 쓰면 필요 없음)<input class="field" id="gKey" type="password" value="${esc(c.key || '')}" autocapitalize="off" spellcheck="false"></label>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn" id="gTest">저장하고 확인</button><button class="btn" id="gReset">기본값으로</button><button class="btn" id="gOff">중계 끄기</button></div>
+                </div>
                 <ol class="steps">
-                  <li><a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">dash.cloudflare.com</a>에 가입·로그인</li>
-                  <li>왼쪽 메뉴 <b>Workers &amp; Pages</b> → <b>Create</b> → <b>Hello World</b> 템플릿 → 이름 <code>market-relay</code> → <b>Deploy</b></li>
-                  <li><b>Edit code</b> → 기존 코드를 지우고 아래 [Worker 코드 복사]로 복사한 내용을 붙여넣기 → <b>Deploy</b></li>
-                  <li>Worker 화면 <b>Settings → Variables and Secrets → Add</b> → Type <b>Secret</b>, 이름 <code>ACCESS_KEY</code>, 값은 아무 긴 문자열 → <b>Deploy</b></li>
-                  <li>Worker 주소(<code>https://market-relay.○○.workers.dev</code>)와 키를 위 칸에 넣고 [연결 확인]</li>
+                  <li>새 Worker 만들기: Cloudflare <b>Workers &amp; Pages → Create → Worker</b> → Hello World → Deploy</li>
+                  <li><b>Edit code</b> → 기존 코드를 지우고 [Worker 코드 복사]로 복사한 내용을 붙여넣기 → <b>Deploy</b></li>
+                  <li>이 사이트 주소에서 온 요청만 받으므로 키 없이도 됩니다. 다른 곳에서도 쓰려면 Settings → Variables and Secrets 에 Secret <code>ACCESS_KEY</code> 추가</li>
                 </ol>
                 <button class="btn" id="gCopyCode" style="margin-top:6px">Worker 코드 복사</button>
               </details>
             </div>
             <div class="card">
               <h2>다른 기기로 옮기기</h2>
-              <p class="note">관심종목·보유자산·알림·중계 설정은 이 브라우저에만 저장됩니다. 백업 코드를 만들어 휴대폰에 붙여넣으면 똑같이 옮겨집니다 (중계 접근 키가 들어 있으니 남에게 보내지 마세요).</p>
+              <p class="note">관심종목·보유자산·알림은 이 브라우저에만 저장됩니다. 백업 코드를 만들어 다른 기기의 설정 화면에 붙여넣으면 똑같이 옮겨집니다. (사파리는 사이트를 7일 넘게 안 열면 저장값을 지울 수 있으니 백업 코드를 메모해 두면 좋습니다.)</p>
               <div style="display:flex;gap:6px;margin:10px 0"><button class="btn" id="gExport">백업 코드 만들기</button><button class="btn" id="gImport">붙여넣은 코드 적용</button></div>
               <textarea class="field code-box" id="gCode" placeholder="여기에 백업 코드를 붙여넣고 [붙여넣은 코드 적용]"></textarea>
             </div>
@@ -1225,17 +1224,29 @@
             </div>
           </div>
         </div>`;
-      $('#gTest', this.el).onclick = async () => {
+      const check = async (cfg) => {
         const msg = $('#gMsg', this.el);
         msg.className = 'status-line';
         msg.innerHTML = '<span class="spinner"></span> 확인 중…';
-        const r = await Relay.test({ url: $('#gUrl', this.el).value, key: $('#gKey', this.el).value });
+        const r = await Relay.test(cfg);
         msg.className = 'status-line ' + (r.ok ? 'ok' : 'bad');
         msg.textContent = (r.ok ? '✓ ' : '✕ ') + r.msg;
         this.renderState();
-        if (r.ok) D.want('settings-kick', []);
       };
-      $('#gOff', this.el).onclick = () => { Relay.save(null); $('#gUrl', this.el).value = ''; $('#gKey', this.el).value = ''; $('#gMsg', this.el).textContent = '연결을 해제했습니다'; this.renderState(); };
+      $('#gCheck', this.el).onclick = () => check(null);
+      $('#gTest', this.el).onclick = () => {
+        const url = $('#gUrl', this.el).value.trim();
+        if (!url) { Relay.save(null); return check(null); }
+        return check({ url, key: $('#gKey', this.el).value });
+      };
+      $('#gReset', this.el).onclick = () => { Relay.save(null); $('#gUrl', this.el).value = ''; $('#gKey', this.el).value = ''; check(null); };
+      $('#gOff', this.el).onclick = () => {
+        Relay.save({ off: true });
+        const msg = $('#gMsg', this.el);
+        msg.className = 'status-line';
+        msg.textContent = '중계를 껐습니다 — 주식은 10~20분 지연 데이터로 보입니다';
+        this.renderState();
+      };
       $('#gCopyCode', this.el).onclick = async () => {
         try {
           const code = await (await fetch('worker.js', { cache: 'no-store' })).text();
@@ -1244,7 +1255,7 @@
         } catch { window.open('worker.js', '_blank'); }
       };
       $('#gExport', this.el).onclick = () => {
-        const data = { v: 1, watch: Watch.list(), portfolio: Portfolio.list(), alerts: Alerts.rules(), relay: Relay.cfg() };
+        const data = { v: 1, watch: Watch.list(), portfolio: Portfolio.list(), alerts: Alerts.rules(), relay: Relay.saved() };
         const code = btoa(unescape(encodeURIComponent(JSON.stringify(data))));
         const ta = $('#gCode', this.el);
         ta.value = code;
@@ -1276,7 +1287,9 @@
     },
     renderState() {
       for (const b of this.el.querySelectorAll('#gTheme button')) b.classList.toggle('on', b.dataset.t === Store.get('ml.theme', 'auto'));
-      $('#gState', this.el).innerHTML = Relay.ok() ? '<span class="ok status-line" style="margin:0">● 연결됨</span>' : '<span class="muted">미연결</span>';
+      const mode = Relay.mode();
+      $('#gState', this.el).innerHTML = mode === 'off' ? '<span class="muted">꺼짐</span>'
+        : `<span class="ok status-line" style="margin:0">● ${mode === 'default' ? '기본 중계 사용 중' : '직접 입력한 중계'}</span>`;
       updateBanner();
     },
     async renderData() {

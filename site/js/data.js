@@ -49,10 +49,19 @@
   const getText = async (url) => (await fetchOk(url)).text();
 
   // ── 중계(Cloudflare Worker) ───────────────────────────
+  // 기본 Worker 는 이 사이트 주소에서 온 요청만 받는다 (worker/worker.js) — 그래서 여기엔 비밀값이 없다.
+  // 설정 화면에서 다른 주소·키를 넣으면 그게 우선하고, 끄면 {off: true} 로 저장한다.
+  const DEFAULT_RELAY = { url: 'https://market-relay.get943.workers.dev', key: '' };
   const Relay = {
-    cfg() { return Store.get('ml.relay', null); },
+    saved() { return Store.get('ml.relay', null); },
+    cfg() {
+      const s = this.saved();
+      if (s && s.off) return null;
+      return s && s.url ? s : DEFAULT_RELAY;
+    },
+    mode() { const s = this.saved(); return s && s.off ? 'off' : s && s.url ? 'custom' : 'default'; },
     save(cfg) {
-      Store.set('ml.relay', cfg && cfg.url ? { url: cfg.url.trim().replace(/\/+$/, ''), key: (cfg.key || '').trim() } : null);
+      Store.set('ml.relay', cfg && cfg.url ? { url: cfg.url.trim().replace(/\/+$/, ''), key: (cfg.key || '').trim() } : cfg && cfg.off ? { off: true } : null);
     },
     ok() { const c = this.cfg(); return !!(c && c.url); },
     url(route, path = '', params = null) {
@@ -64,21 +73,22 @@
     },
     json(route, path, params) { return getJSON(this.url(route, path, params)); },
     text(route, path, params) { return getText(this.url(route, path, params)); },
-    // 설정 화면의 [연결 확인] — 성공하면 저장, 실패하면 이전 설정으로 되돌린다
+    // 설정 화면의 [연결 확인] — 성공하면 저장, 실패하면 이전 설정으로 되돌린다 (cfg 없으면 지금 설정 확인)
     async test(cfg) {
-      const prev = this.cfg();
-      this.save(cfg);
+      const prev = this.saved();
+      if (cfg) this.save(cfg);
       try {
         const c = this.cfg();
+        if (!c) throw new Error('중계가 꺼져 있습니다');
         const head = await getJSON(`${c.url}/${c.key ? '?k=' + encodeURIComponent(c.key) : ''}`);
-        if (!head.keyOk) throw new Error('접근 키가 맞지 않습니다');
+        if (!(head.access ?? head.keyOk)) throw new Error('이 사이트에서 쓸 수 없는 중계입니다 — Worker 코드가 최신인지, 접근 키가 맞는지 확인하세요');
         const d = await this.json('naver-poll', 'domestic/stock/005930');
         const s = d.datas && d.datas[0];
         if (!s) throw new Error('네이버 응답이 비어 있습니다');
         return { ok: true, msg: `연결됨 — ${s.stockName} ${s.closePrice}원 (실시간)` };
       } catch (e) {
-        this.save(prev);
-        return { ok: false, msg: e.status === 403 ? '네이버가 중계 서버를 막았습니다 (403)' : e.message || String(e) };
+        Store.set('ml.relay', prev);
+        return { ok: false, msg: e.status === 403 ? '네이버가 중계 서버를 막았습니다 (403)' : e.status === 401 ? '중계가 이 요청을 거부했습니다 (401) — Worker 코드를 최신으로 바꿔 주세요' : e.message || String(e) };
       }
     },
   };
