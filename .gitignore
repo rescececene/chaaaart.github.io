@@ -1,0 +1,9 @@
+# GitHub Actions 가 10분마다 새로 만드는 데이터
+site/data/
+# 배포할 때 worker/worker.js 를 복사해 넣는다
+site/worker.js
+# 로컬 개발·테스트용
+site/frame.html
+tools/fixture.json
+__pycache__/
+*.pyc

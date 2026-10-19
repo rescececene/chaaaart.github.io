@@ -1,0 +1,65 @@
+name: 데이터 수집 · 배포
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "*/10 * * * *" # 10분마다 (GitHub 사정에 따라 몇 분씩 밀릴 수 있음)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      # 어떤 시장 수집이 실패해도 직전 데이터를 그대로 내보내도록 이전 결과를 먼저 깔아 둔다
+      - name: 이전 데이터 불러오기
+        uses: actions/cache/restore@v6
+        with:
+          path: site/data
+          key: data-${{ github.run_id }}
+          restore-keys: data-
+
+      - name: 스크리너·뉴스·시세 목록 수집
+        run: python collector/collect.py
+        env:
+          PYTHONIOENCODING: utf-8
+
+      - name: 데이터 저장
+        uses: actions/cache/save@v6
+        with:
+          path: site/data
+          key: data-${{ github.run_id }}
+
+      - name: 설정 화면의 [Worker 코드 복사]용
+        run: cp worker/worker.js site/worker.js
+
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
