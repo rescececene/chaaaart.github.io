@@ -60,7 +60,7 @@
     const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
     return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
   }
-  const IV_LABEL = { '15m': '15분', '1h': '1시간', '4h': '4시간', '1d': '일', '1w': '주', '1M': '월' };
+  const IV_LABEL = { '1m': '1분', '3m': '3분', '5m': '5분', '15m': '15분', '30m': '30분', '1h': '1시간', '4h': '4시간', '1d': '일', '1w': '주', '1M': '월' };
   const UNIT = { '1d': '일', '1w': '주', '1M': '개월' };
   const mkBadge = (m) => `<span class="mk">${MARKETS[m].name}</span>`;
   const sigPill = (k) => { const s = Ind.SIGNALS[k]; return s ? `<span class="pill ${s[1]}">${s[1] === 'up' ? '▲ ' : s[1] === 'down' ? '▼ ' : ''}${s[0]}</span>` : ''; };
@@ -449,9 +449,10 @@
         this.load(true);
       }
       clearInterval(this.refreshTimer);
-      // 분봉 새로고침: 바이낸스·중계는 30초, 업비트 직접 호출은 제한 때문에 60초
-      const m = D.marketOf(sym), fast = MARKETS[m].coin && !D.DAILY.has(iv) && (m === 'binance' || Relay.ok());
-      this.refreshTimer = setInterval(() => { if (!document.hidden) this.load(false); }, fast ? 30e3 : 60e3);
+      // 분봉 새로고침: 바이낸스·중계는 20~30초, 업비트 직접 호출은 요청 제한 때문에 60초
+      const m = D.marketOf(sym), canFast = !D.DAILY.has(iv) && (m === 'binance' || Relay.ok());
+      const every = !canFast ? 60e3 : D.IV_SEC[iv] <= 300 ? 20e3 : 30e3;
+      this.refreshTimer = setInterval(() => { if (!document.hidden) this.load(false); }, every);
     },
     leave() { D.unwant('chart'); clearInterval(this.refreshTimer); },
     msg(html) { const m = $('#cMsg', this.el); m.hidden = !html; if (html) m.innerHTML = `<div>${html}</div>`; },
@@ -499,17 +500,25 @@
         if (e.needRelay) this.loadNews();
       }
     },
-    // 실시간 시세로 마지막 봉을 갱신 (코인은 새 봉이 시작됐으면 하나 붙인다)
+    // 실시간 시세로 마지막 봉을 갱신하고, 새 봉이 시작됐으면 하나 붙인다
     applyLive() {
       const q = Quotes.get(this.sym), C = this.candles;
       if (!q || !q.live || q.price == null || !C || !C.length) return false;
-      const m = D.marketOf(this.sym), iv = this.iv, price = q.price;
+      const m = D.marketOf(this.sym), iv = this.iv, price = q.price, p = D.IV_SEC[iv];
       let last = C[C.length - 1];
-      if (MARKETS[m].coin && iv !== '1w' && iv !== '1M') {
+      let barStart = null;
+      const nowSec = Date.now() / 1000;
+      if (MARKETS[m].coin && p) {
         // 거래소 봉 경계는 UTC 기준 — 분봉은 한국 시간 벽시계로 옮기고(+9시간), 일봉은 UTC 날짜 그대로
-        const p = { '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400 }[iv];
-        const utcStart = Math.floor(Date.now() / 1000 / p) * p;
-        const barStart = iv === '1d' ? utcStart : utcStart + 9 * 3600;
+        const utcStart = Math.floor(nowSec / p) * p;
+        barStart = iv === '1d' ? utcStart : utcStart + 9 * 3600;
+      } else if (!MARKETS[m].coin && p && p <= 1800 && q.status === 'OPEN') {
+        // 장중 주식 분봉 (30분봉까지는 정시 기준). 국내는 장 마감 뒤 NXT 시간에도 OPEN 이지만
+        // 실시간 가격이 정규장 종가에 멈춰 있으니 정규장(09:00~15:30)에만 새 봉을 붙인다
+        const kstMin = ((nowSec + 9 * 3600) % 86400) / 60;
+        if (m !== 'krx' || (kstMin >= 540 && kstMin < 930)) barStart = Math.floor((nowSec + 9 * 3600) / p) * p;
+      }
+      if (barStart != null) {
         if (barStart > last.t) {
           last = { t: barStart, o: last.c, h: price, l: price, c: price, v: 0 };
           C.push(last);

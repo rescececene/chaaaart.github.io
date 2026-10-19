@@ -11,7 +11,11 @@
     krx: { name: '국내주식', ccy: 'KRW' },
     us: { name: '미국주식', ccy: 'USD' },
   };
-  const INTERVALS = { coin: ['15m', '1h', '4h', '1d', '1w', '1M'], stock: ['15m', '1h', '1d', '1w', '1M'] };
+  const INTERVALS = {
+    coin: ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M'],
+    stock: ['1m', '3m', '5m', '15m', '30m', '1h', '1d', '1w', '1M'],
+  };
+  const IV_SEC = { '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400 };
   const DAILY = new Set(['1d', '1w', '1M']);
   const STOCK_POLL_MS = 5000;
 
@@ -428,7 +432,10 @@
     return [...m.values()].sort((a, b) => a.t - b.t);
   }
 
-  const UPBIT_PATH = { '15m': 'minutes/15', '1h': 'minutes/60', '4h': 'minutes/240', '1d': 'days', '1w': 'weeks', '1M': 'months' };
+  const UPBIT_PATH = {
+    '1m': 'minutes/1', '3m': 'minutes/3', '5m': 'minutes/5', '15m': 'minutes/15', '30m': 'minutes/30',
+    '1h': 'minutes/60', '4h': 'minutes/240', '1d': 'days', '1w': 'weeks', '1M': 'months',
+  };
   const UPBIT_BLOCKED = '업비트가 잠시 요청을 막았습니다 — 같은 인터넷에서 여러 기기·탭으로 열면 자주 생깁니다. 실시간 중계(Worker)를 연결하면 해결됩니다.';
   const upbitGate = { next: 0 };
   // 업비트는 브라우저발 요청을 같은 IP 기준 10초에 1번 정도만 받는다.
@@ -472,8 +479,9 @@
     const shift = DAILY.has(iv) ? 0 : 9 * 3600; // 분봉은 한국 시간으로
     return d.map((k) => ({ t: k[0] / 1000 + shift, o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] }));
   }
-  const NAVER_PERIOD = { '15m': 'minute15', '1h': 'minute60', '1d': 'day', '1w': 'week', '1M': 'month' };
-  const NAVER_DAYS = { '15m': 20, '1h': 40, '1d': 620, '1w': 2900, '1M': 12500 };
+  // 네이버 분봉은 최근 8거래일 정도까지만 준다
+  const NAVER_PERIOD = { '1m': 'minute', '3m': 'minute3', '5m': 'minute5', '15m': 'minute15', '30m': 'minute30', '1h': 'minute60', '1d': 'day', '1w': 'week', '1M': 'month' };
+  const NAVER_DAYS = { '1m': 4, '3m': 10, '5m': 14, '15m': 20, '30m': 30, '1h': 40, '1d': 620, '1w': 2900, '1M': 12500 };
   async function naverCandles(market, code, iv) {
     const ymd = (d) => d.toISOString().slice(0, 10).replace(/-/g, '') + '0000';
     const now = Date.now();
@@ -485,16 +493,32 @@
       return { t: ymdTs(x.localDateTime || x.localDate), o: x.openPrice || c, h: x.highPrice || c, l: x.lowPrice || c, c, v: x.accumulatedTradingVolume || 0 };
     })).slice(-500);
   }
+  // 미국 주식 분봉 — 야후엔 3분봉이 없어 1분봉을 합친다
+  const YAHOO_IV = { '1m': ['2d', '1m'], '3m': ['5d', '1m'], '5m': ['5d', '5m'], '15m': ['1mo', '15m'], '30m': ['1mo', '30m'], '1h': ['6mo', '60m'] };
   async function yahooCandles(sym, iv) {
     const ticker = nameOf(sym).sub.replace(/\./g, '-');
-    const d = await Relay.json('yahoo', encodeURIComponent(ticker), iv === '15m' ? { range: '1mo', interval: '15m' } : { range: '6mo', interval: '60m' });
+    const [range, interval] = YAHOO_IV[iv];
+    const d = await Relay.json('yahoo', encodeURIComponent(ticker), { range, interval });
     const r = d.chart.result[0], q = r.indicators.quote[0];
     const out = [];
     (r.timestamp || []).forEach((ts, i) => {
       if (q.open[i] == null || q.close[i] == null) return;
       out.push({ t: ts + 9 * 3600, o: q.open[i], h: q.high[i], l: q.low[i], c: q.close[i], v: q.volume[i] || 0 });
     });
-    return dedupe(out);
+    const bars = dedupe(out);
+    return iv === '3m' ? groupBars(bars, (t) => Math.floor(t / 180) * 180) : bars;
+  }
+  // 봉 묶기 — key(t) 가 같은 봉끼리 합친다
+  function groupBars(bars, key) {
+    const out = [];
+    let cur = null;
+    for (const c of bars) {
+      const k = key(c.t);
+      if (!cur || cur.t !== k) { cur = { ...c, t: k }; out.push(cur); } else {
+        cur.h = Math.max(cur.h, c.h); cur.l = Math.min(cur.l, c.l); cur.c = c.c; cur.v += c.v;
+      }
+    }
+    return out;
   }
   // GitHub Actions 가 스크리너를 계산하며 남긴 일봉 (collector/collect.py 의 candle_path 와 같은 규칙)
   async function staticCandles(sym) {
@@ -505,16 +529,10 @@
   // 일봉 → 주봉(월요일 시작) · 월봉
   function aggregate(daily, iv) {
     if (iv === '1d') return daily;
-    const out = [];
-    let cur = null;
-    for (const c of daily) {
-      const d = new Date(c.t * 1000);
-      const key = iv === '1w' ? c.t - ((d.getUTCDay() + 6) % 7) * 86400 : Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000;
-      if (!cur || cur.t !== key) { cur = { ...c, t: key }; out.push(cur); } else {
-        cur.h = Math.max(cur.h, c.h); cur.l = Math.min(cur.l, c.l); cur.c = c.c; cur.v += c.v;
-      }
-    }
-    return out;
+    return groupBars(daily, (t) => {
+      const d = new Date(t * 1000);
+      return iv === '1w' ? t - ((d.getUTCDay() + 6) % 7) * 86400 : Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000;
+    });
   }
   // onWait(초): 업비트 제한으로 기다릴 때 화면에 알려 주는 콜백
   async function candles(sym, iv, onWait) {
@@ -605,7 +623,7 @@
   const meta = () => staticJSON('meta.json', 3 * 60e3);
 
   root.D = {
-    MARKETS, INTERVALS, DAILY, Store, Relay, Names, Quotes, FX, NeedRelay, listOrder,
+    MARKETS, INTERVALS, IV_SEC, DAILY, Store, Relay, Names, Quotes, FX, NeedRelay, listOrder,
     split, marketOf, nameOf, remember, loadCoins, upbitCodes, binanceTop,
     onQuotes, want, unwant, overview, usdtKrw, kimp, refreshKimpRef,
     candles, search, topicNews, symbolNews, googleNewsUrl, screener, meta, loadStaticStocks,
