@@ -33,18 +33,58 @@ function pickMarket(arg: string | undefined): Market {
   return isMarketKey(s) && !isCoinEx(s) ? s : storedCoinEx();
 }
 
-/** 예측력이 약하면 숨기지 말고 먼저 알린다 */
-function weak(m: PredictMarket) {
+/** 예측력이 뚜렷하지 않으면(검증 판정이 strong 이 아니면) 숨기지 말고 먼저 알린다 — 글은 수집기가 쓴 판정(notes 첫 줄)의 쉬운 말 부분 */
+function honesty(m: PredictMarket): { title: string; body: string } | null {
   const b = m.backtest;
-  return b.rankIC == null || b.rankIC < 0.015 || (b.topExcess ?? 0) <= 0;
+  // 판정이 없는 옛 파일: 순위 상관·초과수익으로 대신 본다
+  const v = b.verdict ?? (b.rankIC == null || b.rankIC < 0.015 || (b.topExcess ?? 0) <= 0 ? 'weak' : 'strong');
+  if (v === 'strong') return null;
+  const first = (m.notes[0] ?? '').replace(/^판정:\s*/, '');
+  // 숫자 묶음('검증 2025-04-06~…: 순위 IC …')은 아래 '이 모델의 과거 성적'에 있으므로 앞의 쉬운 말만
+  const plain = first.split(/\s검증 \d{4}-\d{2}-\d{2}/)[0].trim().replace(/^약한 편이에요\((.+?)\)\.\s*/, '$1. ');
+  return v === 'none'
+    ? { title: '과거 검증에서 효과가 없었어요', body: plain || '점수 상위 종목이 평균보다 낫다는 근거가 거의 없어요. 순위·추천은 믿기 어려워요.' }
+    : { title: '과거 검증 성적이 약해요', body: plain || '통계적으로 뚜렷하지 않았어요. 순위는 참고 정도로만 보세요.' };
 }
+
+type Outlook = NonNullable<PredictPick['outlook']>[number];
+const pct = (x: number | null) => (x == null ? '–' : `${Math.round(x * 100)}%`);
+
+/** 단기·중기·장기 — 지금과 비슷했던 과거 자리의 실제 결과(중간값 · 오른 비율). 과거로 되돌려 검증한 등급이 good 이 아니면 '참고 낮음' */
+function OutlookStrip({ items, unit }: { items: Outlook[]; unit: string }) {
+  const allLow = items.every((o) => o.grade !== 'good');
+  return (
+    <div className="rounded-xl bg-tile px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2 text-[12px] leading-4 text-muted-foreground">
+        <span className="min-w-0 break-keep">비슷했던 과거 자리에서 샀다면 <span className="whitespace-nowrap">(중간값)</span></span>
+        {allLow && <LowTag />}
+      </div>
+      <div className="mt-1.5 grid grid-cols-3 gap-2">
+        {items.map((o) => (
+          <div key={o.label} className="min-w-0">
+            <div className="truncate text-[12px] leading-4 text-muted-foreground">{o.label} · {o.h}{unit}</div>
+            <div className={cn('text-[15px] leading-[22px] font-bold tabular', o.q50 == null ? 'text-muted-foreground' : DIR(o.q50))}>{o.q50 == null ? '–' : ratioText(o.q50)}</div>
+            <div className="text-[12px] leading-4 text-faint tabular">오른 비율 {pct(o.win)}</div>
+            {!allLow && o.grade !== 'good' && <LowTag className="mt-1" />}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+const LowTag = ({ className }: { className?: string }) => (
+  <span title="과거로 되돌려 같은 방식으로 맞혀 보니 '같은 종목을 아무 날이나 샀을 때'보다 낫다는 근거가 약했어요"
+    className={cn('inline-flex h-[18px] shrink-0 items-center rounded-[5px] bg-secondary px-1.5 text-[11.5px] font-semibold whitespace-nowrap text-muted-foreground', className)}>
+    참고 낮음
+  </span>
+);
 
 const PickCard = memo(function PickCard({ p, market, horizon }: { p: PredictPick; market: Market; horizon: number }) {
   const q = useQuote(p.sym);
   const unit = MARKETS[market].coin ? '일' : '거래일';
   return (
     <a href={href('chart', p.sym, '1d')} className={cn(CARD_CLS, 'press flex flex-col px-4 pt-5 pb-4 transition-colors hover:bg-hover sm:p-[22px] sm:pb-[18px]')}>
-      {/* 머리: 순위 · 로고 · 이름/티커 — 오른쪽 점수 · 이길 확률(방향이 아닌 값이라 회색) */}
+      {/* 머리: 순위 · 로고 · 이름/티커 — 오른쪽 점수 · 시장 이길 확률(방향이 아닌 값이라 회색) */}
       <div className="grid grid-cols-[auto_40px_minmax(0,1fr)_auto] items-center gap-x-2.5">
         <span className="min-w-3.5 text-center text-[15px] font-bold text-text-3 tabular">{p.rank}</span>
         <SymbolLogo sym={p.sym} size={40} />
@@ -54,7 +94,11 @@ const PickCard = memo(function PickCard({ p, market, horizon }: { p: PredictPick
         </div>
         <div className="flex flex-col items-end">
           <b className="text-[24px] leading-[30px] font-bold tracking-[-0.02em] tabular">{Math.round(p.score)}<small className="ml-px text-[14px] font-semibold text-text-3">점</small></b>
-          {p.probUp != null && <span className="text-[12.5px] whitespace-nowrap text-muted-foreground tabular" title={`${horizon}${unit} 뒤 시장 중앙값보다 오를 확률`}>이길 확률 {Math.round(p.probUp * 100)}%</span>}
+          {p.probUp != null && (
+            <span className="text-[12.5px] whitespace-nowrap text-muted-foreground tabular" title={`${horizon}${unit} 동안 같은 시장 종목들의 중간값보다 더 오를 확률의 추정치 — 가격이 오를 확률이 아니에요`}>
+              시장 이길 확률 {Math.round(p.probUp * 100)}%
+            </span>
+          )}
         </div>
       </div>
       <div className="mt-3.5 flex items-end justify-between gap-2">
@@ -68,7 +112,10 @@ const PickCard = memo(function PickCard({ p, market, horizon }: { p: PredictPick
         <AiRange className="mt-3.5" q10={p.q10} q50={p.q50} q90={p.q90} label={`${horizon}${unit} 뒤 예상 범위`} />
       )}
       {p.reasons.length > 0 && <DotList className="mt-2.5" itemClass="py-[3px] text-[13.5px] leading-5 before:top-[11px]" items={p.reasons.slice(0, 3).map((r) => r.text)} />}
-      {p.analog && (
+      {/* 단기·중기·장기 (비슷했던 과거 자리 최대 100곳) — 없으면 예전처럼 비슷했던 차트 10개 요약 */}
+      {p.outlook?.length ? (
+        <div className="mt-auto pt-3"><OutlookStrip items={p.outlook} unit={unit} /></div>
+      ) : p.analog && (
         <p className="mt-auto pt-3">
           <span className="block rounded-xl bg-tile px-3 py-2.5 text-[13px] leading-[19px] text-text-3">
             비슷했던 과거 차트 {p.analog.n}번 중 <b className="text-foreground">{Math.round(p.analog.winRate * 100)}%</b>가 올랐고 평균 <b className={DIR(p.analog.avg)}>{ratioText(p.analog.avg)}</b>
@@ -118,6 +165,7 @@ export default function PicksPage({ args }: PageProps) {
   useEffect(() => { document.title = `유망 종목 · ${MARKETS[market].name} — 마켓`; return () => { document.title = '마켓'; }; }, [market]);
   const unit = MARKETS[market].coin ? '일' : '거래일';
   const grid = 'grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-2 lg:grid-cols-3 lg:gap-4';
+  const warn = m ? honesty(m) : null;
 
   return (
     <div>
@@ -136,10 +184,10 @@ export default function PicksPage({ args }: PageProps) {
       )}
       {m && (
         <div className="space-y-2 sm:space-y-3 lg:space-y-4">
-          {weak(m) && (
-            <div className={cn(CARD_CLS, 'flex gap-3 px-4 py-3.5 text-[13.5px] leading-[1.55] sm:px-5')}>
+          {warn && (
+            <div role="note" className={cn(CARD_CLS, 'flex gap-3 px-4 py-3.5 text-[13.5px] leading-[1.55] sm:px-5')}>
               <ShieldAlert className="mt-0.5 size-5 shrink-0 text-warn" aria-hidden />
-              <p className="text-secondary-foreground"><b className="font-semibold text-foreground">이 시장에서는 과거 검증 성적이 약해요.</b> 상위 종목이 시장보다 확실히 나았다고 보기 어려워서, 아래 결과는 참고 정도로만 보세요.</p>
+              <p className="break-keep text-secondary-foreground"><b className="font-semibold text-foreground">{warn.title}.</b> {warn.body}</p>
             </div>
           )}
           {/* grid-cols-1: 칸을 화면 폭에 묶는다 (안 그러면 한 줄로 자르는 긴 이유 글이 칸을 밀어 휴대폰에서 가로로 넘친다) */}
@@ -163,8 +211,13 @@ export default function PicksPage({ args }: PageProps) {
               {m.avoid.length ? m.avoid.map((p) => <AvoidRow key={p.sym} p={p} market={market} />) : <Empty>없어요</Empty>}
             </Card>
           </div>
-          <p className="mx-4 text-[12.5px] leading-[1.6] text-muted-foreground sm:mx-1">
-            점수는 같은 시장 안에서의 상대 순위(0~100)이고, '이길 확률'은 시장 중앙값보다 나을 확률의 추정치예요. 과거 데이터로 검증한 통계 모델일 뿐 미래 수익을 보장하지 않으며 투자 권유가 아니에요.
+          <p className="mx-4 text-[12.5px] leading-[1.6] break-keep text-muted-foreground sm:mx-1">
+            점수는 같은 시장 안에서의 상대 순위(0~100)예요.
+            {m.picks.some((p) => p.probUp != null)
+              ? ` ‘시장 이길 확률’은 ${m.horizon}${unit} 동안 같은 시장 종목들의 중간값보다 더 오를 확률의 추정치로, 가격이 오를 확률이 아니에요.`
+              : ' 이 시장은 ‘시장 이길 확률’을 맞힌 근거가 없어 보여 드리지 않아요.'}{' '}
+            단기·중기·장기는 지금과 비슷했던 과거 자리에서 실제로 난 결과의 중간값과 오른 비율이고, 과거로 되돌려 맞혀 본 성적이 약하면 ‘참고 낮음’을 붙였어요.
+            과거 데이터로 만든 통계일 뿐 미래 수익을 보장하지 않으며 투자 권유가 아니에요.
           </p>
         </div>
       )}

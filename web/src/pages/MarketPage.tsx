@@ -2,9 +2,12 @@
 // 코인은 한 탭이고 거래소는 그 아래 [업비트 · 원화 | 바이낸스 · USDT] 로만 고른다.
 //   주소: #/market/upbit · #/market/binance (그 거래소) · #/market/coin (마지막으로 고른 거래소 — ml.coinEx)
 // 성능: 줄마다 자기 시세만 구독(MarketRow) · 정렬은 약 1초마다(useQuotesTick) · 처음엔 40줄만 그리고 나머지는 이어서(transition)
+// 전략 탭: 정렬 칩 아래 '🚀 분출 임박 · ⚡ 돌파 …' — 일봉 패턴 판정(screener/<시장>.json, 10분마다)에 걸린 종목만 점수 순으로,
+//   머리에는 그 패턴의 과거 성적(setups_stats.json, 하루 1번). 둘 다 정적 파일이라 중계 호출은 늘지 않는다.
+//   주소: #/market/upbit/squeeze_breakout — 칩을 누르면 주소만 조용히 바꾼다(화면이 맨 위로 튀지 않게)
 import { startTransition, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp, RotateCw, Search, Star, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, RotateCw, Search, SearchX, Star, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { PageProps } from '@/App';
 import { CARD_CLS, Empty, EMPTY_BTN, RowSkeleton } from '@/components/common/Card';
@@ -15,6 +18,9 @@ import { CoinExSwitch, VenueBadges } from '@/components/market/CoinVenues';
 import { BreadthCard, WatchRail } from '@/components/market/MarketRail';
 import { MarketRow } from '@/components/market/MarketRow';
 import { GRID, ROW_GRID } from '@/components/market/shared';
+import { StrategyBox, StrategyChips } from '@/components/market/StrategyTabs';
+import { setupDefs, setupHits, stratFromArg, type Hit } from '@/components/market/strategy';
+import { isNoData } from '@/components/screener/model';
 import { useMedia } from '@/components/screener/useMedia';
 import {
   CHIPS, chipOn, chipReversed, clearSpot, isTab, loadSorts, makeRanker, nextHeadSort, peekSpot, restoreSpot, sortOf, sortSyms,
@@ -23,7 +29,10 @@ import {
 import { useNamesVersion, useQuotesTick, useRelay, useStockError, useWant } from '@/hooks/market';
 import { coinKey, isCoinEx, saveCoinEx, settleCoinArg, storedCoinEx, type CoinEx } from '@/lib/coins';
 import { dirShown } from '@/lib/format';
-import { binanceTop, FX, getQuote, listOrder, loadCoins, MARKETS, overview, refreshKimpRef, search, Store, upbitCodes, type Sym } from '@/lib/market';
+import {
+  binanceTop, FX, getQuote, listOrder, loadCoins, MARKETS, nameOf, overview, refreshKimpRef, remember, screener, search, setupsStats, Store, upbitCodes,
+  type Market, type Sym,
+} from '@/lib/market';
 import { href, navigate } from '@/lib/router';
 import { distinctWatch, watchStore } from '@/stores';
 
@@ -38,6 +47,10 @@ const TOP_ITEMS: { value: Top; label: ReactNode }[] = [
   { value: 'us', label: '미국주식' },
 ];
 const FIRST_ROWS = 40;
+/** 전략 탭은 점수 상위 50개 + '더 보기' */
+const STRAT_ROWS = 50;
+/** '더 보기'를 누른 전략 (탭/전략) — 차트를 보고 돌아와도 펼친 채로 */
+let lastMore: string | null = null;
 
 /** 주소에 탭이 없으면 마지막으로 본 탭 — 코인이면 거래소는 따로 기억한 쪽(다른 화면에서 바꿨을 수도 있다) */
 function storedTab(): Tab {
@@ -116,25 +129,81 @@ export default function MarketPage({ args }: PageProps) {
     Store.set('ml.mktSort', next);
   };
 
-  // ── 종목 목록 → 정렬 → 순위 ──
+  // ── 전략 (차트 패턴) — 판정·과거 성적 모두 정적 파일 ──
+  const mkt: Market | null = tab === 'watch' ? null : tab;
+  const scr = useQuery({
+    // 종목 골라보기 화면과 같은 열쇠·같은 처리 (한 번 받은 파일을 함께 쓴다)
+    queryKey: ['screener', mkt],
+    queryFn: async () => {
+      const d = await screener(mkt!);
+      for (const r of d.rows) remember(r.sym, { name: r.name, sub: r.sub, ex: r.ex ?? undefined });
+      return d;
+    },
+    enabled: !!mkt,
+    staleTime: 60_000,
+    refetchInterval: 5 * 60_000,
+    retry: (n, e) => !isNoData(e) && n < 1,
+  });
+  const stQ = useQuery({ queryKey: ['setups-stats'], queryFn: setupsStats, enabled: !!mkt, staleTime: 30 * 60e3, retry: (n, e) => !isNoData(e) && n < 1 });
+  const defs = useMemo(() => setupDefs(stQ.data), [stQ.data]);
+  const mktStats = mkt ? stQ.data?.markets?.[mkt] : undefined;
+  const hitsAll = useMemo(
+    () => (scr.data && mkt && scr.data.market === mkt ? setupHits(scr.data.rows, mkt, (s) => nameOf(s).name) : null),
+    [scr.data, mkt, namesV], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  // 고른 전략: 주소(args[1])에서 시작하고, 칩을 누르면 화면 안에서 바꾼 뒤 주소만 조용히 고친다(replaceState — hashchange 없음).
+  // 주소가 바뀌어 새 args 가 오면(뒤로 가기·거래소 바꾸기) 다시 주소를 따른다
+  const [stratPick, setStratPick] = useState<{ args: string[]; key: string | null } | null>(null);
+  const stratRaw = stratPick && stratPick.args === args ? stratPick.key : stratFromArg(args[1]);
+  const stratDef = mkt && stratRaw ? defs.find((d) => d.key === stratRaw) : undefined;
+  const strat = stratDef?.key ?? null;
+  const stratView = `${tab}/${strat}`;
+  // 전략 안에서 열 머리로 다시 정렬 (없으면 점수 순) — 전략을 바꾸면 점수 순으로 돌아간다
+  const [stratSortSt, setStratSortSt] = useState<{ view: string; s: Sort } | null>(null);
+  const stratSort = strat && stratSortSt?.view === stratView ? stratSortSt.s : null;
+  const [moreView, setMoreView] = useState<string | null>(lastMore);
+  const more = !!strat && moreView === stratView;
+  const pickStrat = (key: string | null) => {
+    setStratPick({ args, key });
+    history.replaceState(history.state, '', href('market', tab, key ?? undefined));
+  };
+
+  // ── 종목 목록 → (전략) → 정렬 → 순위 ──
+  // pool: 이 탭의 전체 종목(시세가 있는 것) · order: 화면에 보일 순서 (전략이면 걸린 종목만, 점수 순)
   // 누르는 순간 줄이 자리를 바꾸면 엉뚱한 종목이 열리므로, 누르고 있는 동안(+잠깐)은 순서를 고정한다
   const holdUntil = useRef(0);
-  const last = useRef<{ key: string; order: Sym[] } | null>(null);
-  const order = useMemo(() => {
+  const last = useRef<{ key: string; v: { pool: Sym[]; order: Sym[] } } | null>(null);
+  const { pool, order } = useMemo(() => {
     let syms: Sym[];
     if (tab === 'watch') syms = watchSyms;
     else if (tab === 'upbit') syms = coinsReady ? upbitCodes().map((c) => 'upbit:' + c) : [];
     else if (tab === 'binance') syms = coinsReady ? binanceTop().map((s) => 'binance:' + s) : [];
     else syms = listOrder[tab];
     if (tab !== 'watch') syms = syms.filter((s) => getQuote(s)?.price != null);
-    const key = `${tab}|${sort?.k}|${sort?.d}|${syms.length}|${namesV}|${watchSyms.join(',')}`;
-    if (last.current && last.current.key === key && performance.now() < holdUntil.current) return last.current.order;
-    const sorted = sortSyms(syms, sort);
-    last.current = { key, order: sorted };
-    return sorted;
+    let list = syms;
+    let s = sort;
+    if (strat) {
+      const have = new Set(syms);
+      list = (hitsAll?.get(strat) ?? []).filter((h) => have.has(h.sym)).map((h) => h.sym);
+      s = stratSort;
+    }
+    const key = `${tab}|${strat}|${s?.k}|${s?.d}|${syms.length}|${list.length}|${namesV}|${watchSyms.join(',')}`;
+    if (last.current && last.current.key === key && performance.now() < holdUntil.current) return last.current.v;
+    const v = { pool: syms, order: sortSyms(list, s) };
+    last.current = { key, v };
+    return v;
     // tick·kimpV 는 시세·김프가 바뀌었다는 신호 (값은 getQuote 로 읽는다)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, coinsReady, watchSyms, sort?.k, sort?.d, tick, kimpV, namesV]);
+  }, [tab, coinsReady, watchSyms, sort?.k, sort?.d, tick, kimpV, namesV, strat, hitsAll, stratSort?.k, stratSort?.d]);
+  // 전략별 지금 걸린 종목 수 (이 탭 목록에 있는 것만 — 칩 숫자와 목록 줄 수가 같게)
+  const stratCounts = useMemo(() => {
+    if (!hitsAll || !pool.length) return null;
+    const have = new Set(pool);
+    const m = new Map<string, number>();
+    for (const [k, l] of hitsAll) m.set(k, l.reduce((n, h) => n + (have.has(h.sym) ? 1 : 0), 0));
+    return m;
+  }, [hitsAll, pool]);
+  const hitOf = useMemo(() => new Map<Sym, Hit>(strat ? (hitsAll?.get(strat) ?? []).map((h) => [h.sym, h]) : []), [strat, hitsAll]);
 
   // ── 목록 안 찾기 ──
   const [query, setQuery] = useState('');
@@ -150,26 +219,28 @@ export default function MarketPage({ args }: PageProps) {
   }, [order, ranker]);
   // 이 목록에 없으면 다른 시장까지 찾아 준다 (상단 검색과 같은 결과)
   const noMatch = !!ranker && order.length > 0 && rows.length === 0;
-  const others = useQuery({ queryKey: ['search', dq], queryFn: () => search(dq), enabled: noMatch, staleTime: 60_000 });
+  // (전략 안에서 못 찾으면 다른 시장 대신 '전략을 풀고 찾기'를 권한다)
+  const others = useQuery({ queryKey: ['search', dq], queryFn: () => search(dq), enabled: noMatch && !strat, staleTime: 60_000 });
 
-  // ── 요약: 상승·하락 수, 실시간 여부 ──
+  // ── 요약: 상승·하락 수, 실시간 여부 (전략을 골라도 이 탭 전체 기준) ──
   const stats = useMemo(() => {
     let up = 0, down = 0, live = 0, open = 0;
-    for (const s of order) {
+    for (const s of pool) {
       const q = getQuote(s);
       if (!q) continue;
       const d = dirShown(q.chg);
       if (d === 'up') up++; else if (d === 'down') down++;
       if (q.live) { live++; if (q.status !== 'CLOSE') open++; }
     }
-    return { up, down, flat: order.length - up - down, live, open, total: order.length };
-  }, [order]);
+    return { up, down, flat: pool.length - up - down, live, open, total: pool.length };
+  }, [pool]);
   const liveState: 'live' | 'closed' | 'delayed' | null = !stats.total ? null : !stats.live ? 'delayed' : stock && !stats.open ? 'closed' : 'live';
   const markDelay = stats.live > 0 && stats.live < stats.total;
-  const metric: 'vol' | 'cap' = stock && sort?.k !== 'vol' ? 'cap' : 'vol';
+  const viewSort = strat ? stratSort : sort;
+  const metric: 'vol' | 'cap' = stock && viewSort?.k !== 'vol' ? 'cap' : 'vol';
 
   // ── 처음엔 FIRST_ROWS 줄만, 다음 프레임에 나머지 (탭 전환이 바로 반응하도록) ──
-  const stage = `${tab}:${order.length > 0 ? 1 : 0}`;
+  const stage = `${tab}:${strat ?? ''}:${order.length > 0 ? 1 : 0}`;
   const [fullStage, setFullStage] = useState<string | null>(null);
   const full = fullStage === stage;
   useEffect(() => {
@@ -177,7 +248,8 @@ export default function MarketPage({ args }: PageProps) {
     const id = requestAnimationFrame(() => startTransition(() => setFullStage(stage)));
     return () => cancelAnimationFrame(id);
   }, [full, stage]);
-  const shown = full || ranker ? rows : rows.slice(0, FIRST_ROWS);
+  // 전략은 점수 상위 50개 + '더 보기' (찾을 때는 걸린 종목 전부에서)
+  const shown = strat ? (ranker || more ? rows : rows.slice(0, STRAT_ROWS)) : full || ranker ? rows : rows.slice(0, FIRST_ROWS);
 
   // ── 차트를 보고 돌아오면 보던 자리로 (이 화면에 들어올 때 한 번만 — 다른 탭에서 남긴 자리는 버린다) ──
   const hasRows = rows.length > 0;
@@ -192,7 +264,7 @@ export default function MarketPage({ args }: PageProps) {
 
   // ── 오래 걸리면 안내 ──
   const [slowTab, setSlowTab] = useState<Tab | null>(null);
-  const empty = order.length === 0;
+  const empty = pool.length === 0;
   useEffect(() => {
     if (!empty) return;
     const t = setTimeout(() => setSlowTab(tab), 12_000);
@@ -202,9 +274,13 @@ export default function MarketPage({ args }: PageProps) {
   const stickyTop = useStickyTop();
   const railOn = useMedia('(min-width: 1240px)'); // 오른쪽 레일 — 넓은 화면에서만 그린다(시세 구독도 그때만)
   // 코인 탭을 누르면 마지막으로 고른 거래소로, 거래소를 바꾸면 그 주소로 (#/market/upbit · #/market/binance)
-  const goTop = (t: Top) => { if (t !== top) navigate('market', t === 'coin' ? storedCoinEx() : t); };
-  const goEx = (ex: CoinEx) => { if (ex !== tab) { saveCoinEx(ex); navigate('market', ex); } };
-  const onHeadSort = (k: SortKey) => setSort(nextHeadSort(k, sort));
+  // 고른 전략은 시장을 바꿔도 이어 간다 (관심 탭에는 전략이 없다)
+  const goTop = (t: Top) => { if (t !== top) navigate('market', t === 'coin' ? storedCoinEx() : t, t === 'watch' ? undefined : strat); };
+  const goEx = (ex: CoinEx) => { if (ex !== tab) { saveCoinEx(ex); navigate('market', ex, strat); } };
+  const onHeadSort = (k: SortKey) => {
+    if (strat) setStratSortSt({ view: stratView, s: nextHeadSort(k, stratSort) });
+    else setSort(nextHeadSort(k, sort));
+  };
   // Enter — 가장 잘 맞는 종목의 차트로 (빨리 치고 바로 누르면 아직 늦게 따라오는 목록 대신 지금 입력값으로 고른다)
   const openFirst = () => {
     const q = query.trim();
@@ -246,7 +322,7 @@ export default function MarketPage({ args }: PageProps) {
       <span className="text-up-text">상승 {stats.up}</span><span className="mx-1 text-faint" aria-hidden>·</span><span className="text-down-text">하락 {stats.down}</span>
     </span>
   ) : null;
-  const count = stats.total > 0 ? <span className="whitespace-nowrap tabular">{ranker ? `${rows.length}/${stats.total}` : stats.total}종목</span> : null;
+  const count = stats.total > 0 ? <span className="whitespace-nowrap tabular">{ranker ? `${rows.length}/${order.length}` : stats.total}종목</span> : null;
   const status = liveState === 'live' ? <LiveBadge state="live" />
     : liveState === 'closed' ? <LiveBadge state="closed" label={tab === 'krx' ? '장 마감 · 15:30 기준' : '장 마감'} />
       : liveState === 'delayed' ? <LiveBadge state="delayed" label={stock ? '지연 시세 · 10분 단위' : '지연 시세'} /> : null;
@@ -254,11 +330,11 @@ export default function MarketPage({ args }: PageProps) {
   const metaNarrow = <div className="mt-3 flex items-center justify-between gap-3 text-[13px] text-muted-foreground md:hidden">{breadth ?? <span />}{count}{status}</div>;
 
   const head = (k: SortKey, label: string, cls?: string) => {
-    const on = sort?.k === k;
+    const on = viewSort?.k === k;
     return (
       <button type="button" onClick={() => onHeadSort(k)} aria-label={`${label} 순으로 정렬`}
         className={cn('inline-flex items-center justify-self-end gap-0.5 whitespace-nowrap transition-colors hover:text-foreground', on && 'text-foreground', cls)}>
-        {label}{on && (sort!.d === -1 ? <ArrowDown className="size-3" strokeWidth={2.4} /> : <ArrowUp className="size-3" strokeWidth={2.4} />)}
+        {label}{on && (viewSort!.d === -1 ? <ArrowDown className="size-3" strokeWidth={2.4} /> : <ArrowUp className="size-3" strokeWidth={2.4} />)}
       </button>
     );
   };
@@ -285,6 +361,21 @@ export default function MarketPage({ args }: PageProps) {
         )}
         <RowSkeleton rows={slow ? 3 : 10} />
       </div>
+    );
+  } else if (strat && !order.length) {
+    // 전략에 걸린 종목이 없다 — 판정 파일을 아직 못 받았거나, 받지 못했거나, 정말 없거나
+    body = scr.isPending ? <RowSkeleton rows={4} /> : scr.isError && !scr.data ? (
+      <Empty icon={<SearchX />} title="전략 판정을 불러오지 못했어요" action={<button type="button" onClick={() => void scr.refetch()} className={EMPTY_BTN}><RotateCw className="size-4" />다시 시도</button>}>
+        {isNoData(scr.error) ? '판정이 아직 만들어지지 않았어요. 잠시 뒤 다시 확인해 주세요.' : '네트워크를 확인해 주세요.'}
+      </Empty>
+    ) : (
+      <Empty icon={<SearchX />} title={`지금 ‘${stratDef!.name}’에 걸린 종목이 없어요`} action={<button type="button" onClick={() => pickStrat(null)} className={EMPTY_BTN}>전체 목록 보기</button>}>
+        판정은 10분마다 새로 해요
+      </Empty>
+    );
+  } else if (strat && !rows.length) {
+    body = (
+      <Empty icon={<SearchX />} title={`‘${dq}’ — 지금 ‘${stratDef!.name}’에 걸린 종목 중에는 없어요`} action={<button type="button" onClick={() => pickStrat(null)} className={EMPTY_BTN}>전략 풀고 찾기</button>} />
     );
   } else if (!rows.length) {
     const items = (others.data || []).slice(0, 8);
@@ -324,16 +415,28 @@ export default function MarketPage({ args }: PageProps) {
       <div role="list" aria-label={`${TAB_NAME[tab]} 종목`} onPointerDown={() => { holdUntil.current = performance.now() + 1200; }}>
         {shown.map(({ sym, rank }) => (
           <div role="listitem" key={sym}>
-            <MarketRow sym={sym} rank={rank} tab={tab} metric={metric} watched={watchKeys.has(coinKey(sym))} markDelay={markDelay} kimpKey={kimpKey} namesV={namesV} />
+            <MarketRow sym={sym} rank={rank} tab={tab} metric={metric} watched={watchKeys.has(coinKey(sym))} markDelay={markDelay} kimpKey={kimpKey} namesV={namesV}
+              why={strat ? hitOf.get(sym)?.r : undefined} />
           </div>
         ))}
       </div>
     );
+    if (strat && rows.length > shown.length) {
+      body = (
+        <>
+          {body}
+          <button type="button" onClick={() => { lastMore = stratView; setMoreView(stratView); }}
+            className="press -mx-2 mt-1 flex h-12 w-[calc(100%+1rem)] items-center justify-center gap-1 rounded-[14px] text-[14px] font-semibold text-text-3 hover:bg-hover md:-mx-3 md:w-[calc(100%+1.5rem)]">
+            나머지 {rows.length - shown.length}종목 더 보기<ChevronDown className="size-4" aria-hidden />
+          </button>
+        </>
+      );
+    }
   }
 
   const note = noWatch ? null : tab === 'upbit' ? '거래대금은 최근 24시간 합계예요. 김프는 바이낸스 시세와 환율로 계산한 참고값이에요.'
     : tab === 'binance' ? '등락률과 거래대금은 최근 24시간 기준이에요. 가격 단위는 USDT예요.'
-      : tab === 'watch' ? '★를 다시 누르면 관심 종목에서 빠져요. 관심 종목은 이 기기의 브라우저에만 저장돼요.'
+      : tab === 'watch' ? '★를 다시 누르면 관심 종목에서 빠져요. 관심 종목은 이 기기에만 암호화해 저장돼요.'
         : `${tab === 'krx' ? '코스피·코스닥' : '나스닥·뉴욕증권거래소'} 시가총액 상위 종목이에요. ${relayOk && !stockErr ? '장중에는 2.5초마다 새로 받아요.' : '실시간 중계가 연결되지 않아 10분마다 바뀌는 지연 시세예요.'}`;
 
   const list = (
@@ -367,10 +470,11 @@ export default function MarketPage({ args }: PageProps) {
         <div className="mt-3 flex items-center gap-3">
           {/* 휴대폰에선 칩이 넘치면 옆으로 밀린다 — 오른쪽 끝을 흐리게 해서 더 있다는 걸 보여 준다 */}
           <div className="no-scrollbar -my-1 flex min-w-0 flex-1 gap-2 overflow-x-auto py-1 max-md:-mr-4 max-md:pr-6 max-md:[mask-image:linear-gradient(to_right,black_85%,transparent)]" role="group" aria-label="정렬">
+            {/* 정렬 칩과 전략 칩은 한 묶음의 탭 — 정렬 칩을 누르면 전략을 풀고 전체 목록으로 */}
             {CHIPS[tab].map((c) => {
-              const on = chipOn(c, sort);
+              const on = !strat && chipOn(c, sort);
               return (
-                <Chip key={c.id} on={on} onClick={() => setSort(c.sort ? { ...c.sort } : null)}>
+                <Chip key={c.id} on={on} onClick={() => { if (strat) pickStrat(null); setSort(c.sort ? { ...c.sort } : null); }}>
                   {c.label}
                   {on && chipReversed(c, sort) && (sort!.d === 1 ? <ArrowUp className="-ml-0.5 size-3.5" /> : <ArrowDown className="-ml-0.5 size-3.5" />)}
                 </Chip>
@@ -381,11 +485,24 @@ export default function MarketPage({ args }: PageProps) {
         </div>
       )}
 
+      {/* 전략 칩 (관심 탭에는 없다) + 고른 전략의 머리 — 설명 · 과거 성적 한 줄 */}
+      {mkt && (
+        <StrategyChips defs={defs} counts={stratCounts} stats={mktStats} value={strat} onChange={pickStrat} />
+      )}
+      {mkt && stratDef && (
+        <StrategyBox def={stratDef} stat={mktStats?.[stratDef.key]} stats={stQ.data} market={mkt}
+          count={stratCounts ? stratCounts.get(stratDef.key) ?? 0 : null} updatedAt={scr.data ? Date.parse(scr.data.updatedAt) : null} />
+      )}
+
       {/* 목록 — 태블릿·PC 는 표 머리줄이 사이트 머리글 아래에 붙어 따라온다 */}
       <div className="mt-1.5 md:mt-2">
         {!empty && rows.length > 0 && (
           <div className={cn(ROW_GRID, GRID[tab], 'sticky z-20 -mx-3 hidden h-[34px] bg-card px-3 text-[13px] font-semibold text-muted-foreground md:grid')} style={{ top: stickyTop }}>
-            <span className="text-center">#</span>
+            {strat ? (
+              // 전략: '#' 은 점수 순 — 열 머리로 다시 정렬했다가 되돌아올 때
+              <button type="button" onClick={() => setStratSortSt(null)} aria-label="전략 점수 순으로 정렬" title="점수 순"
+                className={cn('justify-self-center transition-colors hover:text-foreground', !stratSort && 'text-foreground')}>#</button>
+            ) : <span className="text-center">#</span>}
             <span className="col-span-2">{head('name', '종목', 'justify-self-start')}</span>
             {head('price', '현재가')}
             {head('chg', '등락률')}

@@ -1,7 +1,8 @@
 // 뉴스 카드 — 호재·악재 정도에 따라 카드 바탕이 물든다 (미친 호재는 확실히 빨갛게, 미친 악재는 확실히 파랗게).
-// 색만으로 구분하지 않도록 언제나 글자 배지를 붙이고, 판단 근거(AI 이유 · 이용자 투표 · 키워드)를 한 줄로 밝힌다.
+// 색만으로 구분하지 않도록 언제나 글자 배지를 붙이고, 판단 근거(AI 이유 · 이용자 투표 · 키워드 · 공지 종류)를 한 줄로 밝힌다.
+// 거래소 공지는 주의 꼬리표(상장·거래지원 종료·유의)를, 코인 SNS 는 채널 출처(이름 · 인증 · @아이디 · 옮겨 온 곳)를 함께 보인다.
 import { memo, useSyncExternalStore } from 'react';
-import { Sparkles } from 'lucide-react';
+import { Ban, BadgeCheck, Send, ShieldAlert, Sparkles, TriangleAlert } from 'lucide-react';
 import { CARD_CLS } from '@/components/common/Card';
 import { SymbolLogo } from '@/components/common/SymbolLogo';
 import { ChangeText } from '@/components/common/Change';
@@ -9,9 +10,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useNamesVersion, useQuote } from '@/hooks/market';
 import { timeAgo } from '@/lib/format';
 import { nameOf, remember, split, type NewsItem } from '@/lib/market';
-import type { Level, Related, Sentiment } from '@/lib/newsTag';
+import { viaName, type Level, type ListingStudy, type Related, type Sentiment } from '@/lib/newsTag';
 import { href } from '@/lib/router';
 import { cn } from '@/lib/utils';
+import { ListingStudyLine, WARN_TEXT } from './Study';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 /** 10월 19일 20:35 (이 기기 시각) */
@@ -40,17 +42,71 @@ function subscribeMinute(cb: () => void) {
 }
 export const useMinute = () => useSyncExternalStore(subscribeMinute, () => minute);
 
-/** 출처 · 3시간 전 — 시각에 마우스를 올리면 정확한 시각 */
-export function Meta({ item, className }: { item: NewsItem; className?: string }) {
+/** 3시간 전 — 마우스를 올리면 정확한 시각 */
+function Ago({ ts, className }: { ts: number; className?: string }) {
   useMinute();
-  const ms = item.ts ? item.ts * 1000 : 0;
-  const ago = ms ? timeAgo(ms) : '';
+  const ms = ts ? ts * 1000 : 0;
+  if (!ms) return null;
+  return <time className={cn('shrink-0 tabular', className)} dateTime={new Date(ms).toISOString()} title={clockLabel(ms)}>{timeAgo(ms)}</time>;
+}
+
+/** 출처 · (분류 ·) 3시간 전 — sub: 거래소 공지의 분류처럼 출처 뒤에 붙일 짧은 말 */
+export function Meta({ item, sub, className }: { item: NewsItem; sub?: string; className?: string }) {
+  const parts = [item.src, sub].filter(Boolean);
   return (
     <p className={cn('flex min-w-0 items-center gap-1 text-[13px] text-muted-foreground', className)}>
-      {item.src ? <span className="truncate">{item.src}</span> : null}
-      {item.src && ago ? <span aria-hidden className="text-faint">·</span> : null}
-      {ago ? <time className="shrink-0 tabular" dateTime={new Date(ms).toISOString()} title={clockLabel(ms)}>{ago}</time> : null}
+      {parts.length ? <span className="truncate">{parts.join(' · ')}</span> : null}
+      {parts.length && item.ts ? <span aria-hidden className="text-faint">·</span> : null}
+      <Ago ts={item.ts} />
     </p>
+  );
+}
+
+// 거래소 공지의 주의 꼬리표 (collector/coin_social.py) — 주황(주의)으로, 빨강·파랑(가격 방향)과 겹치지 않게
+const CAUTION = {
+  listing: { icon: TriangleAlert, text: '상장 — 과거엔 직후 하락 잦음', short: '신규 상장', title: '과거 거래소 신규 상장 뒤에는 상장 직후 오른 뒤 7일 안에 내린 경우가 많았어요' },
+  delist: { icon: Ban, text: '거래지원 종료', short: '거래지원 종료', title: '거래소가 이 코인의 거래 지원을 끝내요 (상장폐지). 종료일 전에 확인해 주세요' },
+  warning: { icon: ShieldAlert, text: '유의·경고', short: '유의·경고', title: '거래소가 투자 유의 종목·모니터링 대상으로 지정했어요' },
+} as const;
+export function CautionChip({ caution, short, className }: { caution: NonNullable<NewsItem['caution']>; short?: boolean; className?: string }) {
+  const c = CAUTION[caution];
+  if (!c) return null;
+  const Icon = c.icon;
+  return (
+    <span title={c.title} className={cn('inline-flex h-6 shrink-0 items-center gap-1 rounded-md bg-warn/14 px-2 text-[12.5px] font-bold whitespace-nowrap', WARN_TEXT, className)}>
+      <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={2.4} />{short ? c.short : c.text}
+    </span>
+  );
+}
+
+/** 코인 SNS 글의 출처 — 채널 이름 · 인증 표시 · @아이디 · 다른 곳 글을 옮겼으면 그곳 (사칭과 구분할 수 있게 늘 밝힌다) */
+export function SocialSource({ item, className }: { item: NewsItem; className?: string }) {
+  const via = viaName(item.via);
+  return (
+    <div className={cn('flex min-w-0 items-start gap-2.5', className)}>
+      <span aria-hidden className="mt-px grid size-9 shrink-0 place-items-center rounded-full bg-secondary text-secondary-foreground">
+        <Send className="size-4 -translate-x-px translate-y-px" strokeWidth={2.1} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="flex min-w-0 items-center gap-1 text-[14.5px] leading-5 font-bold text-foreground">
+          <span className="truncate">{item.src}</span>
+          {item.verified ? <BadgeCheck aria-hidden className="size-4 shrink-0 text-good" strokeWidth={2.3} /> : null}
+        </p>
+        <p className="flex min-w-0 flex-wrap items-center gap-x-1 text-[12.5px] leading-[18px] text-muted-foreground">
+          {/* 구분점은 뒤 낱말과 함께 줄바꿈되게 — 줄 끝에 '·'만 남지 않도록 */}
+          {item.ch ? <span className="max-w-full truncate">{item.ch}</span> : null}
+          <span className="whitespace-nowrap" title={item.verified ? '텔레그램이 공식 계정으로 확인한 채널이에요' : '코인게코가 알려 준 이 코인의 공식 공지 채널이에요 (텔레그램 인증 표시는 없어요)'}>
+            {item.ch ? <span aria-hidden className="mr-1 text-faint">·</span> : null}{item.verified ? '텔레그램 인증 채널' : '텔레그램 공지 채널'}
+          </span>
+          {via ? (
+            <span className="whitespace-nowrap" title={`이 채널이 ${item.via}에 올린 글의 미리보기를 옮겨 왔어요`}>
+              <span aria-hidden className="mr-1 text-faint">·</span>{via} 글 옮김
+            </span>
+          ) : null}
+        </p>
+      </div>
+      <Ago ts={item.ts} className="mt-px text-[13px] text-muted-foreground" />
+    </div>
   );
 }
 
@@ -143,6 +199,13 @@ export function Reason({ s, aiPending }: { s: Sentiment; aiPending?: boolean }) 
     );
   }
   if (s.basis === 'votes') return <VoteLine s={s} sub={s.level === 0} />;
+  if (s.basis === 'rule') {
+    return s.reason ? (
+      <p className="mt-2.5 text-[13.5px] leading-[1.5] break-keep text-muted-foreground" title="AI가 아직 보지 않아 공지 종류(상장·종료·유의·점검 …)로 먼저 판단했어요">
+        <span className="font-semibold text-secondary-foreground">공지 종류로 판단</span><span className="text-faint"> · </span>{s.reason}
+      </p>
+    ) : null;
+  }
   if (s.basis === 'keywords') {
     const words = [...(s.pos || []).map((w) => ['+', w, 'text-up-text'] as const), ...(s.neg || []).map((w) => ['−', w, 'text-down-text'] as const)].slice(0, 4);
     return (
@@ -204,32 +267,59 @@ export function cleanSummary(raw: string) {
   return s;
 }
 
+/** 거래소 공지 분류 — 짧은 한글 분류만 출처 뒤에 붙인다 ('입출금' · '거래유의'). 바이낸스의 긴 영문 분류는 뺀다 */
+const catOf = (it: NewsItem) => (it.cat && /[가-힣]/.test(it.cat) && it.cat.length <= 10 ? it.cat : undefined);
+
+/** 관련 코인 칩 중 앱에서 열 수 없는 티커 (업비트·바이낸스에 없는 코인) — 누를 수 없는 회색 글자 칩 */
+function CodeChip({ code }: { code: string }) {
+  return (
+    <span title="업비트·바이낸스 상위 목록에 없는 코인이라 차트를 열 수 없어요"
+      className="inline-flex h-8 max-w-full items-center rounded-full bg-secondary px-3 text-[13.5px] font-semibold text-muted-foreground">
+      <span className="truncate">{code}</span>
+    </span>
+  );
+}
+
 /** 기사 카드 — 제목 링크가 카드 전체를 덮고(새 창), 관련 종목 칩만 그 위에 따로 눌린다. 읽은 기사는 제목이 옅어진다.
- *  s 가 없으면(해외 속보) 호재·악재를 판단하지 않은 카드. aiPending: AI 가 아직 보지 않은 새 기사 */
-export const NewsCard = memo(function NewsCard({ item, s, related, aiPending }: { item: NewsItem; s: Sentiment | null; related: Related[]; aiPending?: boolean }) {
+ *  s 가 없으면(해외 속보) 호재·악재를 판단하지 않은 카드. aiPending: AI 가 아직 보지 않은 새 기사.
+ *  거래소 공지: 주의 꼬리표(caution) · 업비트 원화 신규 상장이면 과거 결과(listing). 코인 SNS(item.ch): 채널 출처를 머리에.
+ *  codes: 관련 코인 중 앱에서 열 수 없는 티커 (글자만) */
+export const NewsCard = memo(function NewsCard({ item, s, related, aiPending, listing, codes }: {
+  item: NewsItem; s: Sentiment | null; related: Related[]; aiPending?: boolean; listing?: ListingStudy | null; codes?: string[];
+}) {
   const summary = item.summary ? cleanSummary(item.summary) : '';
   const level: Level = s && s.basis !== 'none' ? s.level : 0;
-  // 배지: 호재·악재로 본 기사는 언제나, 중립은 AI 가 직접 중립이라고 판단했을 때만 (투표·키워드 중립은 조용히)
+  // 배지: 호재·악재로 본 기사는 언제나, 중립은 AI 가 직접 중립이라고 판단했을 때만 (투표·키워드·공지 종류 중립은 조용히)
   const badge = !!s && s.basis !== 'none' && (level !== 0 || s.basis === 'ai');
+  const social = !!item.ch;
+  // 상장 공지는 꼬리표·과거 결과 줄이 '과거엔 …'을 말해 주니, 공지 종류 판단 이유에선 그 뒷말을 덜어 낸다
+  const reasonS = s && s.basis === 'rule' && item.caution === 'listing' && s.reason ? { ...s, reason: s.reason.split(' — ')[0] } : s;
+  const head = badge || item.important || item.caution;
   return (
     <li>
       <article className={cn(CARD_CLS, 'relative px-4 py-[18px] motion-safe:has-[.row-link:active]:scale-[0.99] sm:p-5 md:px-6', CARD_TONE[level])}>
-        <div className="flex min-h-6 min-w-0 items-center gap-1.5">
-          {badge ? <LevelBadge level={level} /> : null}
-          {item.important ? <span className="inline-flex h-6 shrink-0 items-center rounded-md bg-foreground px-1.5 text-[12px] font-bold text-background">중요</span> : null}
-          <Meta item={item} className="ml-auto min-w-0 pl-2" />
-        </div>
-        <h3 className="mt-2 line-clamp-3 text-[17px] leading-[25px] font-bold tracking-[-0.02em] wrap-break-word sm:text-[18px] sm:leading-[26px]">
+        {social ? <SocialSource item={item} /> : null}
+        {!social || head ? (
+          <div className={cn('flex min-h-6 min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1', social && 'mt-3')}>
+            {badge ? <LevelBadge level={level} /> : null}
+            {item.important ? <span className="inline-flex h-6 shrink-0 items-center rounded-md bg-foreground px-1.5 text-[12px] font-bold text-background">중요</span> : null}
+            {item.caution ? <CautionChip caution={item.caution} /> : null}
+            {!social ? <Meta item={item} sub={catOf(item)} className="ml-auto min-w-0 pl-2" /> : null}
+          </div>
+        ) : null}
+        <h3 className={cn('line-clamp-3 text-[17px] leading-[25px] font-bold tracking-[-0.02em] wrap-break-word sm:text-[18px] sm:leading-[26px]', social && !head ? 'mt-3' : 'mt-2')}>
           <a href={item.url} target="_blank" rel="noopener"
             className="row-link text-foreground outline-none visited:text-muted-foreground after:absolute after:inset-0 after:rounded-[inherit] focus-visible:after:ring-2 focus-visible:after:ring-ring">
             {item.title}
           </a>
         </h3>
         {summary ? <p className="mt-1.5 line-clamp-2 text-[14px] leading-[21px] text-text-3 wrap-break-word sm:text-[14.5px] sm:leading-[22px]">{summary}</p> : null}
-        {s ? <Reason s={s} aiPending={aiPending} /> : null}
-        {related.length ? (
+        {reasonS ? <Reason s={reasonS} aiPending={aiPending} /> : null}
+        {listing ? <ListingStudyLine ls={listing} className="mt-2.5" /> : null}
+        {related.length || codes?.length ? (
           <div className="relative z-10 mt-3 flex flex-wrap gap-1.5">
             {related.map((r) => <RelatedChip key={r.sym} sym={r.sym} name={r.name} onTint={Math.abs(level) === 2} />)}
+            {codes?.map((c) => <CodeChip key={c} code={c} />)}
           </div>
         ) : null}
       </article>

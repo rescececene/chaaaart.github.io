@@ -1,6 +1,6 @@
 // 시장 목록 한 줄 — 자기 종목 시세만 구독하고(useQuote) memo 로 감싸서, 시세 하나가 바뀌어도 그 줄만 다시 그린다.
 // 휴대폰: 토스식 두 줄 행(순위·로고·이름/코드 · 가격/등락) / 태블릿·PC(md): 같은 DOM 을 열 정렬된 표로 펼친다.
-import { memo } from 'react';
+import { Fragment, memo } from 'react';
 import { cn } from '@/lib/utils';
 import { SymbolLogo } from '@/components/common/SymbolLogo';
 import { ChangeText, Flash, signedPct } from '@/components/common/Change';
@@ -36,12 +36,15 @@ export interface RowProps {
   kimpKey: string;
   /** 종목 이름표가 바뀌면 다시 그린다 */
   namesV: number;
+  /** 전략 탭 — 이 종목이 걸린 근거 (이름 아래 줄 전체 폭에 ' · ' 로 이어 쓴다) */
+  why?: readonly string[];
 }
 
 const NUM = 'hidden text-right text-[15px] whitespace-nowrap tabular';
 
-export const MarketRow = memo(function MarketRow({ sym, rank, tab, metric, watched, markDelay }: RowProps) {
+export const MarketRow = memo(function MarketRow({ sym, rank, tab, metric, watched, markDelay, why }: RowProps) {
   const q = useQuote(sym);
+  const hasWhy = !!why && why.length > 0;
   const [market] = split(sym);
   const n = nameOf(sym);
   const ccy = ccyOf(market);
@@ -59,10 +62,13 @@ export const MarketRow = memo(function MarketRow({ sym, rank, tab, metric, watch
       data-sym={sym}
       className={cn(
         'relative grid', ROW_GRID, GRID[tab],
-        '-mx-2 min-h-[62px] px-2 md:-mx-3 md:h-[52px] md:min-h-0 md:rounded-[14px] md:px-3',
+        '-mx-2 px-2 md:-mx-3 md:rounded-[14px] md:px-3',
+        // 근거 줄이 있으면 두 줄(가격 줄 + 근거) — 높이는 내용대로
+        hasWhy ? 'gap-y-1 py-2.5 md:gap-y-0.5 md:py-2' : 'min-h-[62px] md:h-[52px] md:min-h-0',
         'transition-colors duration-150 hover:bg-hover has-[>a:active]:bg-secondary/70',
         // 화면 밖 줄은 그리지 않는다 — 자리 크기는 '안쪽(padding 제외)' 높이: 휴대폰 62, 표 52
-        '[contain-intrinsic-size:auto_62px] [content-visibility:auto] md:[contain-intrinsic-size:auto_52px]',
+        hasWhy ? '[contain-intrinsic-size:auto_64px] [content-visibility:auto] md:[contain-intrinsic-size:auto_62px]'
+          : '[contain-intrinsic-size:auto_62px] [content-visibility:auto] md:[contain-intrinsic-size:auto_52px]',
       )}
     >
       {/* 세 자리 순위도 로고와 간격을 지키도록 오른쪽 정렬 (넘치면 왼쪽 여백으로) */}
@@ -132,6 +138,18 @@ export const MarketRow = memo(function MarketRow({ sym, rank, tab, metric, watch
       >
         <StarIcon on={watched} className="size-[17px] md:size-[18px]" />
       </button>
+      {/* 전략 근거 — 이름 칸부터 줄 끝까지 (휴대폰은 두 줄까지) — 별 버튼 뒤에 둬야 첫 줄 칸 배치가 그대로다.
+          줄은 어절 사이에서만 바뀌고(break-keep), '·' 는 앞 근거에 붙여 줄 머리에 오지 않게 */}
+      {hasWhy && (
+        <p className="col-[3/-1] line-clamp-2 text-[12.5px] leading-[18px] break-keep text-text-3 min-[390px]:text-[13px] md:line-clamp-1">
+          {why.map((t, i) => (
+            <Fragment key={i}>
+              {i > 0 && ' '}
+              {t}{i < why.length - 1 && <span className="text-faint">{'\u00a0·'}</span>}
+            </Fragment>
+          ))}
+        </p>
+      )}
     </div>
   );
 });

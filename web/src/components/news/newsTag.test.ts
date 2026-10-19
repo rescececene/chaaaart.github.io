@@ -1,7 +1,10 @@
 // 뉴스 호재·악재 판단(lib/newsTag)이 AI → 투표 → 키워드 순으로 정하고, 관련 종목을 제대로 잇는지
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { listOrder, loadCoins, remember, type AiTag, type NewsItem } from '@/lib/market';
-import { hasWord, keywordHits, medianVotes, relatedOf, resolveTag, sentimentOf, VOTE_NEUTRAL } from '@/lib/newsTag';
+import {
+  hasWord, isNewUpbitListing, isUpbitKrwListing, keywordHits, listingStudy, medianVotes, moodEffect, officialSentiment, relatedOf, resolveTag, sentimentOf,
+  viaName, VOTE_NEUTRAL, type NewsState,
+} from '@/lib/newsTag';
 
 const COINS = {
   upbit: {
@@ -148,5 +151,66 @@ describe('keywordHits — 금리·환율 같은 지표 기사', () => {
     expect(sentimentOf(item({ title: '유가증권시장 2차전지주 급등…신고가' }), 0).level).toBeGreaterThanOrEqual(1);
     // 지표 기사라도 사건 낱말(해킹 등)은 센다
     expect(sentimentOf(item({ title: '해킹 사태에 고개 숙인 은행장…대출금리도 도마' }), 0).level).toBeLessThan(0);
+  });
+});
+
+describe('거래소 공지 · 코인 SNS 판단 (officialSentiment)', () => {
+  const notice = (o: Partial<NewsItem>) => item({ src: '업비트', ...o });
+  it('AI 판단이 있으면 공지 종류 규칙보다 AI', () => {
+    const s = officialSentiment(notice({ title: '질리카(ZIL) 거래지원 종료 안내', rule: { s: -1, r: '거래지원 종료(상장폐지)' } }), ai(-2, '상장폐지 확정'));
+    expect(s).toMatchObject({ level: -2, basis: 'ai', reason: '상장폐지 확정' });
+  });
+  it('AI 가 없으면 공지 종류 규칙(rule)', () => {
+    const s = officialSentiment(notice({ title: '고체인(GO) 출금 일시 중단 안내', rule: { s: -1, r: '네트워크·보안 문제로 입출금 중단' } }));
+    expect(s).toMatchObject({ level: -1, basis: 'rule', reason: '네트워크·보안 문제로 입출금 중단' });
+  });
+  it('SNS 글은 규칙이 없으면 판단하지 않는다 — 영어 글이라도 키워드로 추정하지 않는다', () => {
+    const s = officialSentiment(item({ title: 'SEI surges to all-time high — 급등 신고가 돌파', src: 'Sei', ch: '@seinetwork' }));
+    expect(s).toMatchObject({ level: 0, basis: 'none' });
+    // AI 판단 실패(null)도 판단 없음
+    expect(officialSentiment(item({ title: 'x', ch: '@a' }), null).basis).toBe('none');
+  });
+  it('업비트 원화 신규 상장 공지만 과거 신규 상장 결과를 붙인다', () => {
+    const krw = { caution: 'listing' as const, rule: { s: 0 as const, r: '원화 마켓 신규 상장 — 과거엔 상장 직후 오른 뒤 7일 안에 내린 경우가 많아요' } };
+    expect(isUpbitKrwListing(notice({ title: '콘크리트(CT) 신규 거래지원 안내 (KRW, BTC, USDT 마켓)', ...krw }))).toBe(true);
+    expect(isUpbitKrwListing(notice({ title: '콘크리트(CT) 원화 마켓 추가', src: '빗썸', ...krw }))).toBe(false);
+    expect(isUpbitKrwListing(notice({ title: 'Binance Will List RWUSD', src: '바이낸스', caution: 'listing', rule: { s: 0, r: '바이낸스 현물 신규 상장' } }))).toBe(false);
+  });
+  it('옮겨 온 곳 이름은 짧게', () => {
+    expect(viaName('X (formerly Twitter)')).toBe('X');
+    expect(viaName('LinkedIn')).toBe('LinkedIn');
+    expect(viaName(undefined)).toBe('');
+  });
+});
+
+describe('뉴스 과거 검증 (news_state.json)', () => {
+  const h = (n: number, med: number, win: number, vsNews?: number) => ({ n, raw: [-20, -8, med, 5, 14], rawWin: win, vsNews });
+  const st: NewsState = {
+    coins: { CT: { study: 'krListNew' }, BTC: { study: 'voteBad' } },
+    study: {
+      data: { articles: 14289, period: ['2024-01-17', '2026-10-19'] },
+      groups: {
+        news: { label: '기준', use: 'base', h: { 7: h(7162, -1.94, 41.29) } },
+        voteGood: { label: '투표 호재', use: 'weak', h: { 7: h(1991, -2.26, 38.52, 0.41) } },
+        voteBad: { label: '투표 악재', use: 'none', h: { 7: h(823, -2.44, 37.67, -0.41) } },
+        kwBad: { label: '나쁜 말', use: 'none', h: { 7: h(246, -2.11, 42.28, -0.16) } },
+        krListNew: { label: '업비트 신규 상장', use: 'caution', h: { 7: h(153, -11.39, 24.18, -6.65), 30: h(150, -23.5, 23.33) } },
+      },
+    },
+  };
+  it('일반 호재·악재의 7일 차이는 가장 큰 크기로 (신규 상장은 빼고)', () => {
+    expect(moodEffect(st)).toMatchObject({ maxAbs: 0.41, articles: 14289, from: '2024-01-17', to: '2026-10-19' });
+    expect(moodEffect({})).toBeNull();
+  });
+  it('업비트 신규 상장 숫자는 파일에서', () => {
+    expect(listingStudy(st)).toEqual({ n: 153, med7: -11.39, win7: 24.18, med30: -23.5, baseMed7: -1.94, baseWin7: 41.29 });
+    expect(listingStudy({ study: { groups: {} } })).toBeNull();
+  });
+  it('최근 업비트 신규 상장 코인인가 (티커 대소문자 무관)', () => {
+    expect(isNewUpbitListing(st, 'CT')).toBe(true);
+    expect(isNewUpbitListing(st, 'ct')).toBe(true);
+    expect(isNewUpbitListing(st, 'BTC')).toBe(false);
+    expect(isNewUpbitListing(undefined, 'CT')).toBe(false);
+    expect(isNewUpbitListing(st, null)).toBe(false);
   });
 });

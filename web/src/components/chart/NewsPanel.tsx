@@ -5,8 +5,9 @@ import { aiKey, loadStaticStocks, MARKETS, newsAi, split, symbolNews, topicNews,
 import { timeAgo } from '@/lib/format';
 import { useNamesVersion, useRelay } from '@/hooks/market';
 import { Skeleton } from '@/components/ui/skeleton';
-import { LevelBadge } from '@/components/news/NewsCard';
-import { medianVotes, relatedOf, sentimentOf, VOTE_NEUTRAL, type Sentiment } from '@/lib/newsTag';
+import { CautionChip, LevelBadge } from '@/components/news/NewsCard';
+import { coinBase } from '@/lib/coins';
+import { medianVotes, officialSentiment, relatedOf, sentimentOf, viaName, VOTE_NEUTRAL, type Sentiment } from '@/lib/newsTag';
 import { href } from '@/lib/router';
 import { cn } from '@/lib/utils';
 
@@ -60,6 +61,67 @@ function useFlashFor(sym: Sym, coin: boolean) {
   }, [tn.data, ai.data, sym, key, coin, namesV]);
 }
 
+/** 이 코인 티커가 붙은 거래소 공지 · 코인 공식 텔레그램 글 (+ AI · 공지 종류 판단) — 정적 파일만, 새것부터 3개 */
+type OfficialRow = { x: NewsItem; s: Sentiment; key: 'notice' | 'social' };
+function useOfficialFor(sym: Sym, coin: boolean): OfficialRow[] {
+  const tn = useQuery({ queryKey: ['topicNews'], queryFn: topicNews, staleTime: 5 * 60e3, refetchInterval: 5 * 60e3 });
+  const ai = useQuery({ queryKey: ['newsAi'], queryFn: newsAi, staleTime: 60e3, refetchInterval: (q) => (q.state.status === 'error' ? 10 * 60e3 : 2 * 60e3), retry: 0 });
+  return useMemo(() => {
+    const base = coin ? coinBase(sym) : null;
+    if (!base) return [];
+    const tags = ai.data?.tags, out: OfficialRow[] = [];
+    for (const key of ['notice', 'social'] as const) {
+      for (const x of tn.data?.topics?.find((t) => t.key === key)?.items || []) {
+        if ((x.codes || []).some((c) => String(c).toUpperCase() === base)) out.push({ x, key, s: officialSentiment(x, tags?.[aiKey(key, x)]) });
+      }
+    }
+    return out.sort((a, b) => (b.x.ts || 0) - (a.x.ts || 0)).slice(0, 3);
+  }, [tn.data, ai.data, sym, coin]);
+}
+
+/** 공지·SNS 출처 한 줄 — SNS 는 채널 이름 · @아이디 · 인증 · 옮겨 온 곳까지 (사칭과 구분할 수 있게) */
+function officialSource(x: NewsItem) {
+  if (!x.ch) return x.cat && /[가-힣]/.test(x.cat) && x.cat.length <= 10 ? `${x.src} · ${x.cat}` : x.src;
+  const via = viaName(x.via);
+  return [`${x.src} ${x.ch}`, x.verified ? '텔레그램 인증' : '텔레그램', via ? `${via} 글 옮김` : ''].filter(Boolean).join(' · ');
+}
+
+function OfficialList({ rows }: { rows: OfficialRow[] }) {
+  return (
+    <section className="mb-3" aria-label="거래소 공지 · 공식 채널">
+      <div className="mb-1 flex items-center justify-between">
+        <h3 className="text-[13px] font-semibold text-muted-foreground">거래소 공지 · 공식 채널</h3>
+        <a href={href('news', rows[0].key)} className="text-[13px] font-semibold text-muted-foreground hover:text-foreground">뉴스에서 보기</a>
+      </div>
+      <ul className="space-y-1">
+        {rows.map(({ x, s }) => {
+          const level = s.basis === 'none' ? 0 : s.level;
+          const badge = s.basis !== 'none' && (level !== 0 || s.basis === 'ai');
+          return (
+            <li key={x.id || x.url}>
+              <a href={x.url} target="_blank" rel="noopener"
+                className={cn('press -mx-3 block rounded-[14px] px-3 py-2.5 transition-colors', level === 2 ? HOT_UP : level === -2 ? HOT_DOWN : 'hover:bg-hover')}>
+                {badge || x.caution ? (
+                  <span className="mb-1 flex flex-wrap gap-1">
+                    {badge ? <LevelBadge level={level} className="h-5 px-1.5 text-[12px]" /> : null}
+                    {x.caution ? <CautionChip caution={x.caution} short className="h-5 px-1.5 text-[12px]" /> : null}
+                  </span>
+                ) : null}
+                <div className="line-clamp-2 text-[15px] leading-[22px] font-semibold text-foreground wrap-break-word">{x.title}</div>
+                <div className="mt-1 flex min-w-0 items-center gap-1 text-[13px] text-muted-foreground">
+                  <span className="min-w-0 truncate">{officialSource(x)}</span>
+                  <span aria-hidden>·</span>
+                  <span className="shrink-0 tabular">{timeAgo(x.ts * 1000)}</span>
+                </div>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 /** 속보 한 줄 판단 근거 — AI 이유, 투표, 키워드 */
 function shortReason(s: Sentiment) {
   if (s.basis === 'ai') return s.reason ? `AI · ${s.reason}` : 'AI 판단';
@@ -68,6 +130,7 @@ function shortReason(s: Sentiment) {
     return `투표 ${bull ? '호재' : '악재'} ${Math.round((bull ? s.bullPct : 1 - s.bullPct) * 100)}%`;
   }
   if (s.basis === 'keywords') return '키워드로 추정';
+  if (s.basis === 'rule') return s.reason ? `공지 종류 · ${s.reason.split(' — ')[0]}` : '';
   return '';
 }
 
@@ -103,13 +166,20 @@ function FlashList({ rows, coin }: { rows: { x: NewsItem; s: Sentiment }[]; coin
   );
 }
 
-/** 종목 뉴스 — 주식은 네이버(중계 필요), 코인은 수집된 코인 뉴스. 위에는 이 종목이 붙은 코인니스 속보를 호재·악재 판단과 함께 */
+/** 종목 뉴스 — 주식은 네이버(중계 필요), 코인은 수집된 코인 뉴스. 위에는 이 종목이 붙은 코인니스 속보를 호재·악재 판단과 함께,
+ *  코인은 그 아래 이 코인의 거래소 공지 · 공식 텔레그램 글 */
 export function NewsPanel({ sym, market }: { sym: Sym; market: Market }) {
   const { ok } = useRelay();
   const coin = MARKETS[market].coin;
   const { data, isLoading, isError } = useQuery({ queryKey: ['symnews', sym], queryFn: () => symbolNews(sym), enabled: coin || ok, staleTime: 5 * 60e3 });
   const flash = useFlashFor(sym, coin);
-  const flashList = flash.length ? <FlashList rows={flash} coin={coin} /> : null;
+  const official = useOfficialFor(sym, coin);
+  const flashList = flash.length || official.length ? (
+    <>
+      {flash.length ? <FlashList rows={flash} coin={coin} /> : null}
+      {official.length ? <OfficialList rows={official} /> : null}
+    </>
+  ) : null;
   if (!coin && !ok) return <>{flashList}<p className="py-6 text-center text-[14px] text-muted-foreground">종목 뉴스는 실시간 중계가 연결되면 보여요.</p></>;
   if (isLoading) return <>{flashList}<div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12 w-full bg-secondary" />)}</div></>;
   if (isError || !data) return <>{flashList}<p className="py-6 text-center text-[14px] text-muted-foreground">뉴스를 불러오지 못했어요.</p></>;

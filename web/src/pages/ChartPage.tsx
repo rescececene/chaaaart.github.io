@@ -1,7 +1,7 @@
 // 종목 상세 — 가격 머리(시세 6칸 · 내 평단 한 줄) · 캔들 차트 | 호가 · 기술적 분석 · 주요 지표 · AI 예측 | 내 평단 진단 · 뉴스
 // 코인은 한 종목 — 업비트 원화·바이낸스 USDT 양쪽에 있으면 머리의 [업비트 | 바이낸스] 로 거래소만 바꾼다 (주기는 그대로)
-// 배치: PC(≥1024) 차트 | 호가 392 → 왼쪽 [분석 · 지표 · AI 예측] / 오른쪽 [내 평단 · 뉴스]
-//       태블릿(768~1023) 차트 → 호가 | 내 평단 → 분석 → 지표 → AI 예측 | 뉴스
+// 배치: PC(≥1024) 차트 | 호가 392 → 왼쪽 [분석 · 지표 · AI 예측 · 이 자리에서 사면] / 오른쪽 [내 평단 · 뉴스]
+//       태블릿(768~1023) 차트 → 호가 | 내 평단 → 분석 → 지표 → AI 예측·이 자리에서 사면 | 뉴스
 //       휴대폰(<768) 차트 → [호가 | 분석 | 내 평단 | AI 예측 | 뉴스] 탭
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -16,6 +16,7 @@ import { CandleChart } from '@/components/chart/CandleChart';
 import { OrderBook, roundTick } from '@/components/chart/OrderBook';
 import { AnalysisPanel, KeyStats } from '@/components/chart/AnalysisPanel';
 import { ForecastPanel } from '@/components/chart/ForecastPanel';
+import { OutlookCard } from '@/components/chart/OutlookCard';
 import { NewsPanel } from '@/components/chart/NewsPanel';
 import { PositionCard, PositionHeadline } from '@/components/chart/PositionCard';
 import { AiCommentary } from '@/components/chart/AiCommentary';
@@ -455,11 +456,15 @@ export default function ChartPage({ args }: PageProps) {
             <CardTitle right={<span className="text-[13px] text-muted-foreground">{IV_LABEL[iv]}봉 기준</span>}>주요 지표</CardTitle>
             <KeyStats a={analysis} market={market} iv={iv} />
           </Card>
-          <Card className={cn('md:order-5', hide('forecast'))}>
-            <CardTitle right={<span className="text-[13px] text-muted-foreground">앞으로 14일 · 매일 한 번 학습</span>}>AI 예측</CardTitle>
-            <ForecastPanel sym={sym} market={market} />
-          </Card>
-          {/* 자리: '이 자리에서 사면 단기·중기·장기 기대 수익률'(비슷한 과거 자리 백테스트) 카드 — AI 예측 바로 아래, 같은 [AI 예측] 탭 · md:order-5 */}
+          {/* AI 예측 + 바로 아래 '이 자리에서 사면'(비슷한 과거 자리의 단기·중기·장기 결과) — 휴대폰은 둘 다 [AI 예측] 탭, 태블릿은 왼쪽 한 칸 */}
+          <div className={cn('flex min-w-0 flex-col gap-2 sm:gap-3 md:order-5 lg:gap-4', hide('forecast'))}>
+            <Card>
+              {/* 예측 기간은 시장마다 다르다 (코인 14일 · 주식 20거래일) — 받은 결과의 기간을 따른다 */}
+              <CardTitle right={<span className="text-[13px] text-muted-foreground">앞으로 {forecast.data?.horizon ?? (coin ? 14 : 20)}{coin ? '일' : '거래일'} · 매일 한 번 학습</span>}>AI 예측</CardTitle>
+              <ForecastPanel sym={sym} market={market} />
+            </Card>
+            <OutlookCard sym={sym} market={market} />
+          </div>
         </div>
         <div className="flex min-w-0 flex-col gap-2 sm:gap-3 md:contents lg:flex lg:gap-4">
           {!lg ? (

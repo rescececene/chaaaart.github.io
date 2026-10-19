@@ -6,10 +6,11 @@
 import { binanceTop, isValidSym, listOrder, nameOf, namesVersion, upbitMarkets, type AiTag, type NewsItem, type Sym } from './market';
 
 export type Level = 2 | 1 | 0 | -1 | -2;
-export type Basis = 'ai' | 'votes' | 'keywords' | 'none';
+/** rule: 거래소 공지의 규칙 1차 판단 (collector/coin_social.py — 공지 종류로 정한 점수) */
+export type Basis = 'ai' | 'votes' | 'keywords' | 'rule' | 'none';
 export interface Sentiment {
   level: Level; label: string; basis: Basis;
-  /** AI 가 적은 이유 */
+  /** AI 가 적은 이유 · 규칙 판단의 공지 종류 */
   reason?: string;
   /** 이용자 투표 — 표가 충분할 때만 (근거가 AI 여도 함께 보여 줄 수 있게) */
   bullPct?: number; votes?: number;
@@ -108,6 +109,62 @@ export function sentimentOf(it: NewsItem, feedMedianVotes: number, ai?: AiTag | 
   const level: Level = k.score >= 4 ? 2 : k.score >= 2 ? 1 : k.score <= -4 ? -2 : k.score <= -2 ? -1 : 0;
   return { level, label: LEVEL_LABEL[level], basis: level ? 'keywords' : 'none', pos: k.pos, neg: k.neg, ...v };
 }
+
+/** 거래소 공지 · 코인 SNS 판단 — AI(news_ai.json 'notice:<id>'·'social:<id>') → 공지는 규칙 1차 판단(rule) → 없으면 판단하지 않는다.
+ *  SNS 글은 영어가 많아 한국어 핵심 단어로 추정하지 않는다 (투표도 없다) */
+export function officialSentiment(it: NewsItem, ai?: AiTag | null): Sentiment {
+  if (ai && isLevel(ai.s)) {
+    return { level: ai.s, label: LEVEL_LABEL[ai.s], basis: 'ai', reason: typeof ai.r === 'string' && ai.r.trim() ? ai.r.trim() : undefined };
+  }
+  const r = it.rule;
+  if (r && isLevel(r.s)) return { level: r.s, label: LEVEL_LABEL[r.s], basis: 'rule', reason: typeof r.r === 'string' && r.r.trim() ? r.r.trim() : undefined };
+  return { level: 0, label: LEVEL_LABEL[0], basis: 'none' };
+}
+
+// ── 뉴스 과거 검증 (data/news_state.json — collector/news_hist.py) ──
+/** 묶음 하나의 기간별 결과 — raw: 수익률 분위 10·25·50·75·90 (%), rawWin: 오른 비율 (%), vsNews: 보통 뉴스와의 차이 (%p) */
+export interface StudyH { n: number; raw: number[]; rawWin: number; vsNews?: number; vsLo?: number; vsHi?: number; p?: number }
+export interface StudyGroup { label: string; use: 'base' | 'weak' | 'none' | 'caution'; h: Record<string, StudyH | undefined> }
+export interface NewsCoinState { tags?: string[]; study?: string; d1?: number[]; d3?: number[]; tone?: number; last?: number; upbitDays?: number | null }
+export interface NewsState {
+  updatedAt?: string;
+  coins?: Record<string, NewsCoinState | undefined>;
+  study?: { asOf?: string; data?: { articles?: number; period?: string[] }; summary?: string[]; groups?: Record<string, StudyGroup | undefined> };
+}
+const fin = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
+/** 일반 호재·악재 묶음 — 투표 호재·악재, 제목의 좋은 말·나쁜 말 */
+const MOOD_GROUPS = ['voteGood', 'voteBad', 'kwGood', 'kwBad'];
+
+/** 호재·악재 표시가 과거 가격에 준 영향 — 일반 묶음의 7일 '보통 뉴스 대비 차이' 중 가장 큰 크기 (%p).
+ *  articles·from·to: 검증에 쓴 기사 수와 기간 */
+export function moodEffect(st: NewsState | null | undefined): { maxAbs: number; articles?: number; from?: string; to?: string } | null {
+  const g = st?.study?.groups;
+  if (!g) return null;
+  const xs = MOOD_GROUPS.map((k) => g[k]?.h?.['7']?.vsNews).filter(fin).map(Math.abs);
+  if (!xs.length) return null;
+  const d = st?.study?.data;
+  return { maxAbs: Math.max(...xs), articles: d?.articles, from: d?.period?.[0], to: d?.period?.[1] };
+}
+
+/** 업비트 신규 상장 뒤 과거 결과 — n 건, 7일 뒤 중앙값·오른 비율, 30일 뒤 중앙값, 같은 기간 보통 뉴스 코인의 7일 중앙값·오른 비율 (% 단위) */
+export interface ListingStudy { n: number; med7: number; win7: number; med30: number | null; baseMed7: number | null; baseWin7: number | null }
+export function listingStudy(st: NewsState | null | undefined): ListingStudy | null {
+  const g = st?.study?.groups;
+  const h7 = g?.krListNew?.h?.['7'], h30 = g?.krListNew?.h?.['30'], b7 = g?.news?.h?.['7'];
+  if (!h7 || !fin(h7.n) || !fin(h7.raw?.[2]) || !fin(h7.rawWin)) return null;
+  return {
+    n: h7.n, med7: h7.raw[2], win7: h7.rawWin,
+    med30: h30 && fin(h30.raw?.[2]) ? h30.raw[2] : null,
+    baseMed7: b7 && fin(b7.raw?.[2]) ? b7.raw[2] : null, baseWin7: b7 && fin(b7.rawWin) ? b7.rawWin : null,
+  };
+}
+/** 이 코인이 '최근 업비트에 새로 상장한 코인'(news_state 의 study = krListNew)인가 */
+export const isNewUpbitListing = (st: NewsState | null | undefined, ticker: string | null | undefined) =>
+  !!ticker && st?.coins?.[ticker.toUpperCase()]?.study === 'krListNew';
+/** 업비트 원화 마켓 신규 상장 공지인가 — 규칙 판단이 '원화 마켓 신규 상장'으로 본 업비트 공지 */
+export const isUpbitKrwListing = (it: NewsItem) => it.caution === 'listing' && it.src === '업비트' && (it.rule?.r ?? '').startsWith('원화 마켓');
+/** SNS 글을 옮겨 온 곳의 짧은 이름 — 'X (formerly Twitter)' → 'X' */
+export const viaName = (via: string | null | undefined) => String(via || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
 
 // ── 관련 코인·종목 ──
 // 본문의 영문 대문자 낱말 중 티커처럼 보이지만 흔한 단어·약어라 거르는 것

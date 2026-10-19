@@ -1,27 +1,32 @@
 // 뉴스 — 코인 속보 · 주식 속보 · 해외 속보는 중계로 30초마다(화면이 보일 때만), 나머지 주제는 GitHub Actions 가 10분마다 모은 news.json.
 // 코인·주식 속보는 호재·악재를 판단해 카드 바탕을 물들인다: AI 판단(news_ai.json, 2분마다 확인) → 이용자 투표 → 키워드 순.
-// 해외 속보는 판단하지 않고 관련 종목만 붙인다. 주제는 #/news/<주제> 로 연다.
+// 거래소 공지(notice)·코인 SNS(social, 코인 공식 텔레그램 채널)는 AI → 공지 종류 규칙(공지만) 순 — SNS 는 영어 글이 많아 키워드로 추정하지 않는다.
+// 해외 속보는 판단하지 않고 관련 종목만 붙인다. 호재·악재는 참고용이라는 과거 검증 한 줄(news_state.json)을 함께. 주제는 #/news/<주제> 로 연다.
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'motion/react';
-import { ArrowUpRight, Newspaper, Sparkles } from 'lucide-react';
+import { ArrowUpRight, Megaphone, Newspaper, Send, Sparkles } from 'lucide-react';
 import type { PageProps } from '@/App';
 import { CARD_CLS, Empty, EMPTY_BTN, PageTitle } from '@/components/common/Card';
 import { Chip } from '@/components/common/Segmented';
 import { LiveBadge } from '@/components/common/Status';
 import { CardSkeletons, clockLabel, NewsCard } from '@/components/news/NewsCard';
 import { countMentions, LatestElsewhere, MentionStrip, TopicTabs, TopMentions, uniqItems } from '@/components/news/NewsFeed';
+import { MoodNote, useNewsState } from '@/components/news/Study';
 import { useInterval, useNamesVersion, useRelay, useWant } from '@/hooks/market';
 import { timeAgo } from '@/lib/format';
 import { aiKey, googleNewsUrl, LIVE_TOPICS, loadStaticStocks, newsAi, split, Store, topicNews, type NewsItem, type Sym } from '@/lib/market';
-import { medianVotes, relatedOf, sentimentOf, VOTE_NEUTRAL, type FeedKind, type Related, type Sentiment } from '@/lib/newsTag';
+import { isUpbitKrwListing, listingStudy, medianVotes, officialSentiment, relatedOf, sentimentOf, VOTE_NEUTRAL, type FeedKind, type Related, type Sentiment } from '@/lib/newsTag';
 import { navigate } from '@/lib/router';
 
 // 주제별 출처와 '더 보기' 주소 — 수집기(collector/collect.py)와 같은 출처. q 는 Google 뉴스 검색어
-const META: Record<string, { q?: string; site?: string; url?: string }> = {
+// more: '더 보기' 글 (없으면 '<사이트>에서 ‘<주제>’ 더 보기') · none: 한곳에 모아 볼 원문 목록이 없어 '더 보기'를 두지 않는다
+const META: Record<string, { q?: string; site?: string; url?: string; more?: string; none?: boolean }> = {
   world: { site: '네이버 증권', url: 'https://m.stock.naver.com/investment/news/worldnews' },
   coinflash: { site: '코인니스', url: 'https://coinness.com/news' },
   stockflash: { site: '코인니스', url: 'https://coinness.com/stock-news' },
+  notice: { site: '업비트·빗썸·바이낸스', url: 'https://upbit.com/service_center/notice', more: '업비트 공지사항 전체 보기' },
+  social: { site: '코인 공식 텔레그램 채널', none: true },
   us: { q: '뉴욕증시 OR 나스닥 OR 미국 증시' },
   krx: { q: '코스피 OR 코스닥' },
   coin: { q: '비트코인 OR 가상자산 OR 이더리움' },
@@ -30,7 +35,8 @@ const META: Record<string, { q?: string; site?: string; url?: string }> = {
 const siteOf = (key: string) => META[key]?.site ?? 'Google 뉴스';
 function moreLink(key: string, label: string) {
   const m = META[key];
-  if (m?.url) return { url: m.url, text: `${m.site}에서 ‘${label}’ 더 보기` };
+  if (m?.none) return null;
+  if (m?.url) return { url: m.url, text: m.more ?? `${m.site}에서 ‘${label}’ 더 보기` };
   return { url: googleNewsUrl(m?.q ?? label), text: `Google 뉴스에서 ‘${label}’ 더 보기` };
 }
 const GOOGLE_ECON = 'https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtdHZHZ0pMVWlnQVAB?hl=ko&gl=KR&ceid=KR:ko';
@@ -38,15 +44,22 @@ const GOOGLE_ECON = 'https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZN
 /** 속보 세 주제는 데이터가 늦어도 늘 맨 앞에 (중계로 바로 받을 수 있다) */
 const FIRST = [{ key: 'coinflash', label: '코인 속보' }, { key: 'stockflash', label: '주식 속보' }, { key: 'world', label: '해외 속보' }];
 /** AI 판단이 붙는 주제 (해외 속보는 AI 로 판단하지 않는다) */
-const AI_TOPICS = new Set(['coinflash', 'stockflash']);
+const AI_TOPICS = new Set(['coinflash', 'stockflash', 'notice', 'social']);
+/** 거래소 공지 · 코인 SNS — 투표·키워드 대신 공지 종류 규칙(공지만)으로, 관련 코인은 수집기가 붙인 티커(codes) */
+const OFFICIAL = new Set(['notice', 'social']);
+/** 코인 쪽 주제 — 호재·악재 과거 검증 숫자(코인 속보로 쟀다)를 보여 준다 */
+const COIN_TOPICS = new Set(['coinflash', 'coin', 'notice', 'social']);
 /** 호재·악재를 아예 판단하지 않는 주제 — 관련 종목만 */
 const NO_JUDGE = new Set(['world']);
-const KIND: Record<string, FeedKind> = { coinflash: 'coin', coin: 'coin', stockflash: 'stock', world: 'stock', us: 'stock', krx: 'stock', macro: 'stock' };
+const KIND: Record<string, FeedKind> = { coinflash: 'coin', coin: 'coin', notice: 'coin', social: 'coin', stockflash: 'stock', world: 'stock', us: 'stock', krx: 'stock', macro: 'stock' };
 /** 관련 종목 실시간 시세를 받는 최대 종목 수 — 코인은 거래소 웹소켓이라 넉넉히, 주식은 중계로 20개씩 묶어 받으니
  *  시장(국내·미국)마다 20개까지만 (한 번 새로 받을 때 시장마다 중계 요청 하나) */
 const WANT_CAP = { coin: 60, krx: 20, us: 20 } as const;
 type Filter = 'all' | 'bull' | 'bear';
-interface Row { x: NewsItem; s: Sentiment | null; related: Related[] }
+/** listing: 업비트 원화 신규 상장 공지 (과거 결과 줄을 붙인다) · codes: 관련 코인 중 앱에서 열 수 없는 티커 */
+interface Row { x: NewsItem; s: Sentiment | null; related: Related[]; listing?: boolean; codes?: string[] }
+/** 종목 → 코인 티커 (upbit:KRW-BTC · binance:BTCUSDT → BTC) */
+const tickerOfSym = (sym: Sym) => { const [m, c] = split(sym); return m === 'upbit' ? c.replace(/^KRW-/, '') : m === 'binance' ? c.replace(/USDT$/, '') : c; };
 const levelOf = (r: Row) => (r.s && r.s.basis !== 'none' ? r.s.level : 0);
 
 /** 회색 바탕 위 보조 버튼 — 카드색 바탕 */
@@ -84,6 +97,10 @@ export default function NewsPage({ args }: PageProps) {
   const label = tabs.find((t) => t.key === key)?.label ?? topic?.label ?? '';
   const judge = !NO_JUDGE.has(key);
   const aiOn = AI_TOPICS.has(key);
+  const official = OFFICIAL.has(key);
+  // 과거 검증 (정적 파일, 중계 요청 없음) — '호재·악재는 참고용' 한 줄과 업비트 신규 상장 과거 결과
+  const st = useNewsState(judge);
+  const ls = useMemo(() => listingStudy(st.data), [st.data]);
 
   // 속보 주제는 중계로 바로 — 30초마다, 탭이 숨겨지면 멈추고 돌아오면 바로 새로 (실패하면 조용히 10분 단위 데이터로)
   const liveFn = relayOk ? LIVE_TOPICS[key] : undefined;
@@ -105,10 +122,16 @@ export default function NewsPage({ args }: PageProps) {
     const median = medianVotes(items), neutral = VOTE_NEUTRAL[key] ?? 0.5, kind = KIND[key] ?? 'mixed';
     return items.map((x) => {
       const tag = tags ? tags[aiKey(key, x)] : undefined;
+      if (official) {
+        const related = relatedOf(x, kind, tag, 4);
+        const known = new Set(related.map((r) => tickerOfSym(r.sym)));
+        const codes = (x.codes || []).map((c) => String(c).toUpperCase()).filter((c) => c && !known.has(c)).slice(0, Math.max(0, 4 - related.length));
+        return { x, s: officialSentiment(x, tag), related, codes, listing: isUpbitKrwListing(x) };
+      }
       return { x, s: judge ? sentimentOf(x, median, tag, neutral) : null, related: relatedOf(x, kind, tag, 3) };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, key, tags, judge, namesV]);
+  }, [items, key, tags, judge, official, namesV]);
   const nBull = rows.filter((r) => levelOf(r) > 0).length;
   const nBear = rows.filter((r) => levelOf(r) < 0).length;
   const nAi = rows.filter((r) => r.s?.basis === 'ai').length;
@@ -152,6 +175,10 @@ export default function NewsPage({ args }: PageProps) {
   };
   let note: string;
   if (!judge) note = '해외 속보는 호재·악재를 판단하지 않고, 관련 종목만 보여 드려요.';
+  else if (key === 'notice') note = tags || ai.isLoading
+    ? '업비트·빗썸·바이낸스 공지를 10분마다 모아요. AI가 공지마다 판단하고, AI가 아직 보지 않은 공지는 공지 종류(상장·거래지원 종료·유의 …)로 먼저 판단해요.'
+    : '업비트·빗썸·바이낸스 공지를 10분마다 모아요. 공지 종류(상장·거래지원 종료·유의 …)로 먼저 판단해요.';
+  else if (key === 'social') note = '코인 프로젝트의 공식 텔레그램 공지 채널 글을 10분마다 모아요 (실시간 중계는 아니에요). 사칭 계정이 많으니 채널 이름과 @아이디를 꼭 확인해 주세요. 호재·악재는 AI가 본 글만 표시해요.';
   else if (aiOn && (tags || ai.isLoading)) note = 'AI가 기사마다 호재·악재를 판단해요. AI가 아직 보지 않은 새 기사는 이용자 투표나 키워드로 추정해요.';
   else if (aiOn) note = '이용자 투표나 제목·요약의 단어로 호재·악재를 추정해요. 참고만 해 주세요.';
   else note = '제목에 쓰인 단어로 호재·악재를 추정해요. 참고만 해 주세요.';
@@ -165,6 +192,14 @@ export default function NewsPage({ args }: PageProps) {
         <Empty icon={<Newspaper />} title="뉴스를 불러오지 못했어요"
           action={<button onClick={() => { void refetch(); if (liveFn) void live.refetch(); }} disabled={isFetching || live.isFetching} className={EMPTY_BTN}>{isFetching || live.isFetching ? '다시 불러오는 중…' : '다시 시도'}</button>}>
           인터넷 연결을 확인하고 다시 시도해 주세요
+        </Empty>
+      </div>
+    );
+  } else if (!items.length && official) {
+    body = (
+      <div className={CARD_CLS}>
+        <Empty icon={key === 'social' ? <Send /> : <Megaphone />} title="아직 모인 글이 없어요">
+          10분마다 모아요. {key === 'social' ? '코인 공식 텔레그램 채널에 새 글이 올라오면' : '업비트·빗썸·바이낸스에 새 공지가 올라오면'} 여기에 보여 드려요
         </Empty>
       </div>
     );
@@ -183,12 +218,16 @@ export default function NewsPage({ args }: PageProps) {
     body = (
       <motion.div key={key} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18, ease: 'easeOut' }}>
         <ul className="space-y-2" aria-label={`${label} 뉴스`}>
-          {shown.map((r) => <NewsCard key={r.x.id || r.x.url || r.x.title} item={r.x} s={r.s} related={r.related} aiPending={aiPending(r)} />)}
+          {shown.map((r) => (
+            <NewsCard key={r.x.id || r.x.url || r.x.title} item={r.x} s={r.s} related={r.related} aiPending={aiPending(r)} listing={r.listing ? ls : null} codes={r.codes} />
+          ))}
         </ul>
-        <a href={more.url} target="_blank" rel="noopener"
-          className={`${CARD_CLS} press mt-2 flex h-12 w-full items-center justify-center gap-1 px-4 text-[14px] font-semibold text-secondary-foreground hover:bg-hover`}>
-          <span className="truncate">{more.text}</span><ArrowUpRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        </a>
+        {more ? (
+          <a href={more.url} target="_blank" rel="noopener"
+            className={`${CARD_CLS} press mt-2 flex h-12 w-full items-center justify-center gap-1 px-4 text-[14px] font-semibold text-secondary-foreground hover:bg-hover`}>
+            <span className="truncate">{more.text}</span><ArrowUpRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          </a>
+        ) : null}
       </motion.div>
     );
   }
@@ -215,7 +254,8 @@ export default function NewsPage({ args }: PageProps) {
               </div>
             ) : null}
             <MentionStrip mentions={mentions} className="mt-3.5 lg:hidden" />
-            <p className="mt-3 text-[12.5px] leading-[1.6] text-muted-foreground">{note}</p>
+            {judge && items.length ? <MoodNote st={st.data} coin={COIN_TOPICS.has(key)} className="mt-3">{note}</MoodNote>
+              : <p className="mt-3 text-[12.5px] leading-[1.6] break-keep text-muted-foreground">{note}</p>}
           </section>
           {body}
         </div>
