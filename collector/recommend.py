@@ -9,7 +9,7 @@
 규칙 (collector/model/recrule.py 가 과거 각 날짜에 똑같이 적용해 검증한다)
   1. 검증 등급이 strong/weak 인 시장만. none 이면 그 묶음은 비우고 이유를 notes 에.
   2. 그 시장 오늘 점수 상위 10% 안(엔진 picks 의 pctRank ≥ 90)에서
-  3. 뺀다: 과열 주의·하락 경고(최신 스크리너 판정), 거래대금 하위 30%, 상장 30일 미만(업비트 일봉 수·신규 상장 소식),
+  3. 뺀다: 과열 주의·하락 경고(최신 스크리너 판정), 거래대금 하위 30%(코인은 24시간 100억 원 미만도), 상장 30일 미만(업비트 일봉 수·신규 상장 소식),
      업비트 투자유의, 상폐·해킹 소식, 스테이블코인, 바이낸스 주식·ETF 토큰,
      엔진 기준 종가보다 지금 가격이 ATR 2배 넘게 움직인 종목(이미 급등/급락 — 예측 당시와 자리가 달라짐)
   4. 국면 필터(엔진 백테스트가 고른 경우만): 시장 20일 수익률 < 0 이면 60일 변동성 하위 절반만
@@ -27,6 +27,8 @@ OUT = Path(__file__).resolve().parent.parent / "web" / "public" / "data"
 N_PICK = 5
 TOP_PCT_RANK = 90.0   # pctRank(0~100) — 점수 상위 10%
 LIQ_MIN_PCT = 0.3
+COIN_MIN_VALUE = 100e8  # 코인은 24시간 거래대금 100억 원 이상만 (사용자 요청 — 너무 작은 코인은 빼기)
+FX = {'usd': 1350.0}  # 바이낸스 USDT 거래대금 → 원 (overview.json 의 USD/KRW 로 덮어씀)
 MIN_AGE = 30
 MOVE_ATR = 2.0
 STALE_DAYS = {"upbit": 3, "binance": 3, "krx": 5, "us": 5}
@@ -128,6 +130,9 @@ def build(now=None):
     coins = _read(OUT / "coins.json") or {}
     warn = {c for c, v in (coins.get("upbit") or {}).items() if isinstance(v, list) and len(v) > 2 and v[2]}
     news = (_read(OUT / "news_state.json") or {}).get("coins") or {}
+    for it in (_read(OUT / "overview.json") or {}).get("items") or []:
+        if it.get("id") == "USDKRW" and _num(it.get("price")):
+            FX["usd"] = float(it["price"])
     us_bases = {p["sym"].split(":", 1)[1].split(".")[0] for p in ((markets.get("us") or {}).get("picks") or [])}
     groups, notes, backtest = {}, [], {}
     all_cands = {}
@@ -216,6 +221,11 @@ def cand(m, p, r, row, warn, news, us_bases, regime_filter):
         return "바이낸스 주식 토큰"
     if m == "upbit" and code in warn:
         return "업비트 투자유의"
+    if m in ("upbit", "binance"):
+        v = _num((row or {}).get("vol"))
+        krw = None if v is None else v * (FX["usd"] if m == "binance" else 1)
+        if krw is None or krw < COIN_MIN_VALUE:
+            return "거래대금 100억 원 미만" if krw is not None else "거래대금 확인 불가"
     if (_num(rx.get("dvPct")) is not None and rx["dvPct"] < LIQ_MIN_PCT):
         return "거래대금 하위 30%"
     if (rx.get("obs") or 999) < MIN_AGE:
