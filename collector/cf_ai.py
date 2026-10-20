@@ -86,7 +86,9 @@ def chat(system, user, max_tokens, temperature=0.1, timeout=60):
     if not account or not token:
         raise Stop("CF_ACCOUNT_ID / CF_AI_TOKEN 없음")
     body = json.dumps({"messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                       "max_tokens": max_tokens, "temperature": temperature}).encode("utf-8")
+                       "max_tokens": max_tokens, "temperature": temperature,
+                       # Gemma 4 는 기본으로 긴 '생각'을 해서 사용량이 4배쯤 늘어난다 — 끈다 (실측 7.9 → 1.9 뉴런)
+                       "chat_template_kwargs": {"enable_thinking": False}}).encode("utf-8")
     req = urllib.request.Request(f"{API}/accounts/{account}/ai/run/{MODEL}", data=body, method="POST", headers={
         "Authorization": f"Bearer {token}", "Content-Type": "application/json"})
     try:
@@ -102,7 +104,7 @@ def chat(system, user, max_tokens, temperature=0.1, timeout=60):
     u = res.get("usage") or {}
     tin = u.get("prompt_tokens") or (len(system) + len(user)) / 1.5
     tout = u.get("completion_tokens") or max_tokens / 2
-    neurons = (tin * N_IN + tout * N_OUT) / 1e6
+    neurons = u.get("neurons") or (tin * N_IN + tout * N_OUT) / 1e6  # Cloudflare 가 알려 주는 실제 뉴런이 있으면 그것
     if isinstance(res.get("response"), str):
         text = res["response"]
     elif res.get("response") is not None:
