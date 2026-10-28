@@ -12,7 +12,7 @@ import { Btn, Dot, FieldLabel, INPUT_CLS } from './parts';
 import { copyWorkerCode, friendlyRelayError, hostOf, relayCheck, saveRelay, testRelay, type RelayCheck as Result } from './relayTools';
 
 type Mode = 'off' | 'custom' | 'default';
-const OFF_MSG = '중계가 꺼져 있어요. 주식은 10~20분 지연된 시세로 보여요';
+const OFF_MSG = '중계가 꺼져 있어요. 주식은 늦은(보통 1시간 안쪽) 시세로 보여요';
 const HELP_CLS = 'mt-1.5 px-0.5 text-[12.5px] text-muted-foreground';
 
 const B = ({ children }: { children: ReactNode }) => <b className="font-semibold text-foreground">{children}</b>;
@@ -112,7 +112,7 @@ export function RelayCard() {
   const turnOff = () => {
     seq.current++;
     void saveRelay({ off: true });
-    setResult({ kind: 'info', msg: '중계를 껐어요. 주식은 10~20분 지연된 시세로 보여요' });
+    setResult({ kind: 'info', msg: '중계를 껐어요. 주식은 늦은(보통 1시간 안쪽) 시세로 보여요' });
   };
   const onEnter = (e: ReactKeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;

@@ -1,4 +1,4 @@
-// 종목 AI 해설 — GitHub Actions 가 하루 2번 시장별 주요 종목에 대해 만든 data/stock_ai.json (정적 파일 · 중계 호출 없음)
+// 종목 AI 해설 — GitHub Actions 가 업비트 원화 전 종목과 시장별 상위 종목을 몇 시간마다 돌려 가며 만든 data/stock_ai.json (정적 파일 · 중계 호출 없음)
 // 코인은 이 거래소에 해설이 없으면 같은 코인의 다른 거래소 해설을 보여 준다 (업비트 원화 → 바이낸스 순)
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -61,7 +61,7 @@ export function AiCommentary({ sym, className, title = 'AI 해설' }: { sym: Sym
         </>
       ) : (
         <p className="mt-1.5 text-[13.5px] leading-relaxed break-keep text-muted-foreground">
-          {failed ? 'AI 해설을 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.' : '이 종목은 아직 AI 해설이 없어요 (시장별 주요 종목만 하루 2번)'}
+          {failed ? 'AI 해설을 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.' : '이 종목은 아직 AI 해설이 없어요 (업비트 원화 전 종목과 시장별 상위 종목을 몇 시간마다 돌려 가며 해설해요)'}
         </p>
       )}
     </section>

@@ -1,4 +1,4 @@
-// 데이터 상태 — 시세 출처별 상태 · GitHub Actions 수집기의 마지막 수집 · 소요 · 오류
+// 데이터 상태 — 시세 출처별 상태 · GitHub Actions 수집기의 마지막 수집 · 소요 · 오류 · AI 사용량(Gemma 무료 · 클로드 누적 한도)
 import { useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardTitle } from '@/components/common/Card';
@@ -6,11 +6,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useInterval, useRelay, useStockError } from '@/hooks/market';
 import { timeAgo } from '@/lib/format';
 import { collectMeta, MARKETS, newsAi, Relay, type Market } from '@/lib/market';
+import { claudeState, claudeToday, claudeUsage, gemmaToday, gemmaUsage, usdLimit, usdText, utcDay } from '@/lib/market/aiUsage';
 import { Dot } from './parts';
 import { useRelayCheck } from './relayTools';
 
 const whenFmt = new Intl.DateTimeFormat('ko-KR', { month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-const STALE_MIN = 30; // 10분마다 돌지만 GitHub 사정으로 몇 분씩 밀리곤 한다
+const STALE_MIN = 90; // 10분마다로 설정했지만 GitHub 사정으로 실제로는 보통 40~70분 간격이다
 const secsText = (s: number) => { const v = Math.round(s); return v < 60 ? `${v}초` : `${Math.floor(v / 60)}분 ${v % 60}초`; };
 const sourceName = (k: string) => (k in MARKETS ? MARKETS[k as Market].name : k);
 
@@ -46,14 +47,16 @@ export function DataStatusCard() {
   const check = useRelayCheck();
   const meta = useQuery({ queryKey: ['collect-meta'], queryFn: collectMeta, refetchInterval: 60_000, staleTime: 30_000, retry: 1 });
   const ai = useQuery({ queryKey: ['news-ai'], queryFn: newsAi, refetchInterval: 120_000, staleTime: 60_000, retry: false });
+  const gemma = useQuery({ queryKey: ['ai-usage'], queryFn: gemmaUsage, refetchInterval: 120_000, staleTime: 60_000, retry: false });
+  const claude = useQuery({ queryKey: ['claude-usage'], queryFn: claudeUsage, refetchInterval: 120_000, staleTime: 60_000, retry: false });
   // 'n분 전'이 저절로 바뀌도록 30초마다 다시 그린다
   const [, setTick] = useState(0);
   useInterval(() => setTick((t) => t + 1), 30_000);
 
   // 주식: 중계 꺼짐 → 지연 / 지금 쓰는 중계의 연결 확인 결과 우선 / 확인 전이면 시세 받기 오류로 판단
   const current = check && !check.reverted ? check : null;
-  const stock = !relayOk ? { v: withDot('warn', '10~20분 지연'), s: '중계가 꺼져 있어요' }
-    : current?.kind === 'bad' ? { v: withDot('warn', '10~20분 지연'), s: '중계에 연결하지 못했어요' }
+  const stock = !relayOk ? { v: withDot('warn', '1시간 안쪽 지연'), s: '중계가 꺼져 있어요' }
+    : current?.kind === 'bad' ? { v: withDot('warn', '1시간 안쪽 지연'), s: '중계에 연결하지 못했어요' }
       : current?.kind === 'busy' ? { v: withDot('off', '확인 중', true), s: '중계 연결을 확인하고 있어요' }
         : current?.kind !== 'ok' && stockErr ? { v: withDot('warn', '지연 시세'), s: '최근 중계 요청이 실패했어요' }
           : { v: withDot('good', '실시간'), s: '중계를 거쳐 네이버 증권에서' };
@@ -64,6 +67,11 @@ export function DataStatusCard() {
   const errs = m ? Object.entries(m.errors || {}) : [];
   const skel = <Skeleton className="ml-auto h-4 w-20" />;
   const none = <span className="text-muted-foreground">–</span>;
+  // Gemma 오늘 뉴런 — 사용량 장부(ai_usage.json)가 있으면 그것, 없으면 뉴스 판단 파일에 적힌 값
+  const neurons = gemmaToday(gemma.data) ?? (ai.data ? (ai.data.usage?.day === utcDay() ? ai.data.usage.neurons : 0) : null);
+  const cu = claude.data;
+  const cs = claudeState(cu);
+  const spent = cu && typeof cu.totalUsd === 'number' ? cu.totalUsd : null;
 
   return (
     <Card>
@@ -72,7 +80,7 @@ export function DataStatusCard() {
         <Row k="코인" value={withDot('good', '실시간')} sub="업비트·바이낸스에서 직접" />
         <Row k="국내·미국 주식" value={stock.v} sub={stock.s} />
       </Group>
-      <Group title="스크리너·뉴스 수집" sub="GitHub Actions · 약 10분마다" className="mt-4">
+      <Group title="스크리너·뉴스 수집" sub="GitHub Actions · 보통 1시간 안쪽마다" className="mt-4">
         <Row
           k="마지막 수집"
           value={meta.isLoading ? skel : Number.isFinite(at) ? withDot(fresh ? 'good' : 'warn', <span className="tabular">{timeAgo(at)}</span>) : <span className="text-muted-foreground">아직 없음</span>}
@@ -89,12 +97,25 @@ export function DataStatusCard() {
           value={<span className="tabular">오늘 {Relay.today().toLocaleString('ko-KR')}건</span>}
           sub="계정 전체 하루 10만 건 · 오전 9시 초기화"
         />
+      </Group>
+      <Group title="AI 사용량" sub="판단·해설은 무료 Gemma · 예측 문장은 클로드" className="mt-4">
         <Row
-          k="뉴스 AI 판단"
-          value={ai.isLoading ? skel : ai.data
-            ? withDot(ai.data.error ? 'warn' : 'good', <span className="tabular">오늘 약 {Math.round(ai.data.usage?.day === new Date().toISOString().slice(0, 10) ? ai.data.usage.neurons : 0).toLocaleString('ko-KR')} 뉴런</span>)
+          k="뉴스·종목 해설 AI"
+          value={ai.isLoading && gemma.isLoading ? skel : neurons != null
+            ? withDot(ai.data?.error ? 'warn' : 'good', <>Gemma(무료) · <span className="tabular">오늘 약 {Math.round(neurons).toLocaleString('ko-KR')} 뉴런</span></>)
             : <span className="text-muted-foreground">꺼짐</span>}
-          sub={ai.data ? <>하루 1만 뉴런 중 8천에서 멈춰요 · {timeAgo(Date.parse(ai.data.updatedAt))} 판단{ai.data.error ? <> · {ai.data.error.slice(0, 40)}</> : null}</> : '토큰을 등록하면 코인·주식 속보를 AI가 판단해요'}
+          sub={neurons != null
+            ? <>하루 1만 뉴런 중 8천에서 멈춰요{ai.data ? <> · {timeAgo(Date.parse(ai.data.updatedAt))} 판단</> : null}{ai.data?.error ? <> · {ai.data.error.slice(0, 40)}</> : null}</>
+            : '토큰을 등록하면 코인·주식 속보를 AI가 판단해요'}
+        />
+        <Row
+          k="예측 문장 AI"
+          value={claude.isLoading ? skel : cs.on && cu && spent != null
+            ? withDot('good', <>클로드 하이쿠 · <span className="tabular">누적 {usdText(spent)} / {usdLimit(cu.limitUsd)}</span></>)
+            : withDot(cs.tone, 'Gemma(무료)로 쓰는 중')}
+          sub={claude.isLoading ? undefined : cs.on && cu
+            ? <span className="tabular">오늘 {usdText(claudeToday(cu))} · 하루 {usdLimit(cu.dailyLimitUsd)}까지</span>
+            : <>{cs.reason}{cu && spent ? <> · <span className="tabular">지금까지 {usdText(spent)} / {usdLimit(cu.limitUsd)}</span></> : null}</>}
         />
       </Group>
       {errs.length > 0 && (

@@ -70,7 +70,7 @@ export function ForecastPanel({ sym, market }: { sym: Sym; market: Market }) {
     return (
       <div className="py-6 text-center text-[14px] leading-[1.6] text-muted-foreground">
         이 종목은 예측 대상이 아니에요.<br />{MARKETS[market].name}에서 시가총액·거래대금 상위 {m?.universe ?? ''}개 종목을 예측해요.
-        <div className="mt-3"><a className="font-semibold text-foreground underline-offset-2 hover:underline" href={href('picks', market)}>{MARKETS[market].name} 유망 종목 보기</a></div>
+        <div className="mt-3"><a className="font-semibold text-foreground underline-offset-2 hover:underline" href={href('picks', market)}>{MARKETS[market].name} 전체 순위 보기</a></div>
       </div>
     );
   }

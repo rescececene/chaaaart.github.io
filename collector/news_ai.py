@@ -1,5 +1,6 @@
-"""뉴스 호재·악재 AI 판단 — 코인니스 코인·주식 속보를 Cloudflare Workers AI 로 (cf_ai.py 참고)
+"""뉴스 호재·악재 AI 판단 — 코인니스 코인·주식 속보를 Cloudflare Workers AI(Gemma, 무료)로 (cf_ai.py 참고)
 
+클로드는 쓰지 않는다 — 뉴스 판단은 Gemma 그대로 (사용자 결정 2026-10-28. 클로드는 새 예측 문장만, ai.py).
 중계 Worker 를 거치지 않으므로 중계 요청 수(계정 전체 하루 10만 건)와 상관없고,
 AI 무료 사용량을 다 써도 AI 판단만 그날 멈춘다 (무료 플랜이면 요금도 없다). 해외 속보는 판단하지 않는다.
 CF_ACCOUNT_ID / CF_AI_TOKEN 이 없으면 아무것도 하지 않는다 → 사이트는 투표·키워드로 판단한다.
@@ -37,9 +38,13 @@ s (영향 점수):
 -2  미친 악재 — 큰 폭락을 부를 만한 소식 (해킹, 파산, 상장폐지, 사기·기소, 강한 규제, 실적 쇼크 등)
 규칙:
 - 2와 -2는 정말 큰 소식에만 쓴다. 대부분은 -1, 0, 1 이다.
-- 이미 일어난 가격 움직임만 전하는 기사는 신고가·급등락처럼 두드러질 때만 ±1, 아니면 0.
+- 이미 일어난 가격·지수·금리·환율 움직임을 전하는 기사는 0 이다 (예: 'WTI 원유, 장중 2.00% 상승', '나스닥 1% 하락 출발',
+  '비트코인 9만 달러 돌파', '국채 금리 하락'). 움직임은 결과일 뿐 판단 근거가 아니다.
+  같은 기사에 원인이 되는 소식(상장·실적·해킹·규제 등)이 있으면 그 소식으로 판단한다.
 - r: 판단 이유를 한국어로 짧게 (20자 안팎).
-- t: 직접 영향을 받는 코인 티커(BTC, ETH 등)나 종목(미국은 티커, 한국은 회사 이름) 최대 3개. 없으면 빈 배열.
+- t: 직접 영향을 받는 실제 코인 티커(BTC, ETH 등)나 상장 종목(미국은 티커, 한국은 회사 이름)만, 최대 3개.
+  원자재·지수·금리·통화·중앙은행·정부·기관·비상장 회사·프로젝트·사이트 이름(예: WTI, 금, 나스닥, Fed, ADNOC, Predict.fun)은 넣지 않는다.
+  없으면 빈 배열.
 - '거래소 공지'는 거래소가 직접 올린 공지다. [규칙 판단]이 붙어 있으면 그 점수를 그대로 쓰고, 본문이 분명히 다를 때만 바꾼다.
   과거 데이터상 신규 상장은 직후 오른 뒤 7일 안에 내린 경우가 많아 0, 거래지원 종료·유의 종목 지정은 -1 이다 (±2 로 올리지 않는다).
   입출금 중단은 사유가 해킹·체인 정지면 -1(대형 해킹이면 -2), 정기 업그레이드·점검이면 0.
@@ -83,8 +88,19 @@ def parse(text, n):
         if not 0 <= i < n or i in out or not -2 <= s <= 2:
             continue
         t = [str(v).strip() for v in (x.get("t") if isinstance(x.get("t"), list) else [])]
-        out[i] = {"s": s, "r": str(x.get("r") or "").strip()[:40], "t": [v for v in t if v and len(v) <= 24][:3]}
+        out[i] = {"s": s, "r": str(x.get("r") or "").strip()[:40], "t": [v for v in t if v and len(v) <= 24 and ticker_ok(v)][:3]}
     return out
+
+
+# AI 가 t 에 자주 잘못 넣는 것 (티커·상장 종목이 아님). 웹(lib/newsTag.ts 의 AI_STOP)도 한 번 더 거른다
+NOT_TICKER = {"WTI", "BRENT", "OIL", "GOLD", "SILVER", "LNG", "FED", "FOMC", "ECB", "BOJ", "BOE", "PBOC", "SEC", "CFTC", "IMF",
+              "OPEC", "CPI", "PPI", "PCE", "GDP", "USD", "KRW", "JPY", "EUR", "CNY", "DXY", "VIX", "NASDAQ", "KOSPI", "KOSDAQ",
+              "S&P500", "S&P 500", "DOW", "NYSE", "ADNOC", "연준", "금", "은", "원유", "유가", "금리", "환율", "나스닥", "코스피", "코스닥", "다우"}
+
+
+def ticker_ok(v):
+    """'Predict.fun' 처럼 사이트 주소꼴이거나 원자재·지수·기관 이름이면 뺀다"""
+    return v.upper() not in NOT_TICKER and not re.search(r"\.[a-z]{2,}$", v)
 
 
 def ask(kind, items):

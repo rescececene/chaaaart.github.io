@@ -1,0 +1,5 @@
+# AI 문장(collector/ai.py → claude_ai.py) 전용 — 공식 Anthropic 파이썬 SDK
+# 설치가 실패해도 수집은 계속되고, 클로드 대신 Gemma(무료)로 쓴다.
+# 1.14.0(2026-10-14 배포): 참고한 SDK 문서(1.x)와 같은 줄이고, 갓 나온 2.x(10-21~)는 피했다.
+# 이 버전에서 thinking={"type": "disabled"} · output_config.format(json_schema) · transform_schema 를 확인했다 (로컬 Python 3.14).
+anthropic==1.14.0

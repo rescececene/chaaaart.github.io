@@ -273,7 +273,7 @@ def main():
             news_hist.run(topics, OUT)
         except Exception:
             traceback.print_exc()
-    try:  # 시장별 주요 종목 AI 해설 (하루 2번 정도 · 비밀값이 없으면 건너뜀)
+    try:  # 종목 AI 해설 (업비트 전 종목 + 시장별 상위 — 실행마다 몫만큼 돌려 가며 · 비밀값이 없으면 건너뜀)
         stock_ai.run(BRIEFS, OUT / "stock_ai.json")
     except Exception:
         traceback.print_exc()

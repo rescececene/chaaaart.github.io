@@ -370,7 +370,7 @@ export default function MarketPage({ args }: PageProps) {
       </Empty>
     ) : (
       <Empty icon={<SearchX />} title={`지금 ‘${stratDef!.name}’에 걸린 종목이 없어요`} action={<button type="button" onClick={() => pickStrat(null)} className={EMPTY_BTN}>전체 목록 보기</button>}>
-        판정은 10분마다 새로 해요
+        판정은 자동 수집 때마다(보통 1시간 안쪽) 새로 해요
       </Empty>
     );
   } else if (strat && !rows.length) {
@@ -437,7 +437,7 @@ export default function MarketPage({ args }: PageProps) {
   const note = noWatch ? null : tab === 'upbit' ? '거래대금은 최근 24시간 합계예요. 김프는 바이낸스 시세와 환율로 계산한 참고값이에요.'
     : tab === 'binance' ? '등락률과 거래대금은 최근 24시간 기준이에요. 가격 단위는 USDT예요.'
       : tab === 'watch' ? '★를 다시 누르면 관심 종목에서 빠져요. 관심 종목은 이 기기에만 암호화해 저장돼요.'
-        : `${tab === 'krx' ? '코스피·코스닥' : '나스닥·뉴욕증권거래소'} 시가총액 상위 종목이에요. ${relayOk && !stockErr ? '장중에는 2.5초마다 새로 받아요.' : '실시간 중계가 연결되지 않아 10분마다 바뀌는 지연 시세예요.'}`;
+        : `${tab === 'krx' ? '코스피·코스닥' : '나스닥·뉴욕증권거래소'} 시가총액 상위 종목이에요. ${relayOk && !stockErr ? '장중에는 2.5초마다 새로 받아요.' : '실시간 중계가 연결되지 않아 자동 수집 때마다(보통 1시간 안쪽) 바뀌는 지연 시세예요.'}`;
 
   const list = (
     <section className={cn(CARD_CLS, 'min-w-0 px-4 pt-0.5 pb-3 sm:px-5 md:px-6 md:pt-1.5')}>

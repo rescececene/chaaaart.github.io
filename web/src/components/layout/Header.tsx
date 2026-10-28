@@ -14,7 +14,7 @@ import { LiveBadge } from '@/components/common/Status';
 import { SearchCommand } from './SearchCommand';
 
 export const NAV: [PageKey, string][] = [
-  ['recommend', '추천'], ['market', '시장'], ['picks', '유망 종목'], ['chart', '차트'], ['screener', '종목 골라보기'], ['news', '뉴스'],
+  ['recommend', '추천'], ['pump', '펌핑 후보'], ['market', '시장'], ['chart', '차트'], ['screener', '종목 골라보기'], ['news', '뉴스'],
 ];
 const MAX_W = 'mx-auto max-w-[1248px]';
 
@@ -115,7 +115,7 @@ export function Header() {
             className={cn('relative flex shrink-0 items-center whitespace-nowrap transition-colors',
               mobile ? 'px-1.5 text-[14px] min-[420px]:px-2.5 min-[420px]:text-[15px]' : 'px-[13px] text-[16px]',
               on ? 'font-bold text-foreground' : 'font-semibold text-muted-foreground hover:text-secondary-foreground')}>
-            {label}{page === 'picks' && <AI />}
+            {label}{page === 'recommend' && <AI />}
             {on && <motion.span layoutId={mobile ? 'nav-m' : 'nav-d'} className={cn('absolute bottom-0 h-[2px] rounded-t-[2px] bg-foreground', mobile ? 'inset-x-1.5 min-[420px]:inset-x-2.5' : 'inset-x-[13px]')} transition={{ type: 'spring', stiffness: 520, damping: 40 }} />}
           </a>
         );

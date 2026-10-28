@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from 'react';
 
 export interface Route { page: string; args: string[] }
-const PAGES = ['recommend', 'market', 'picks', 'chart', 'screener', 'news', 'settings'] as const;
+const PAGES = ['recommend', 'pump', 'market', 'picks', 'chart', 'screener', 'news', 'settings'] as const;
 export type PageKey = (typeof PAGES)[number];
 
 function parse(): Route {

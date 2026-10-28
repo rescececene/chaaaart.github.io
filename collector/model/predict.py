@@ -8,6 +8,7 @@ import math
 import os
 import threading
 import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +17,7 @@ import numpy as np
 import analogs
 import engine
 import explain
+import expret
 import features
 import history
 import outlook
@@ -23,6 +25,8 @@ import recrule
 import sources
 
 N_PICKS, N_AVOID, SPARK = 20, 10, 60
+HIST_N = 45         # 종목 파일에 남기는 최근 종가 수 (추천 기록 채점용 — collector/picks_log.py)
+MKT_RET_N = 60      # summary 에 남기는 '날짜별 시장 전체 H 수익' 개수 (채점의 시장 평균)
 MIN_UNIVERSE = 12   # 이보다 작으면 순위·검증이 의미 없다 (하루 횡단면 통계에 10종목 이상 필요)
 LAG_MAX = 0.10      # 오늘 유니버스 중 마지막 날 일봉이 빠진 종목이 이 비율을 넘으면 그 시장은 실패로 (직전 결과 유지)
 # sources.STABLE 에 없는 스테이블코인(법정화폐 연동). collect.py 동작은 그대로 두고 모형 쪽에서만 뺀다.
@@ -91,6 +95,51 @@ def is_pegged(market, code, a):
     med = float(np.median(c))
     r = np.diff(np.log(c))
     return bool(np.all(np.abs(c / med - 1) < 0.02) and np.std(r) < 0.003)
+
+
+# 금·비트코인·이더리움 등에 값이 묶인 토큰 — 모형 유니버스에는 그대로 두고(학습 데이터를 바꾸지 않는다) 순위 목록에서만 뺀다
+PEG_NAMES = {
+    "금": {"PAXG", "XAUT", "KAU", "XAUM", "DGX", "PMGT"},
+    "비트코인": {"WBTC", "CBBTC", "BTCB", "TBTC", "FBTC", "LBTC", "SOLVBTC", "RENBTC", "UNIBTC", "PUMPBTC", "ENZOBTC"},
+    "이더리움": {"WETH", "STETH", "WSTETH", "BETH", "WBETH", "CBETH", "RETH", "METH", "WEETH", "EZETH", "RSETH", "OETH"},
+    "솔라나": {"BNSOL", "JITOSOL", "MSOL", "BSOL", "JUPSOL"},
+    "BNB": {"WBNB"},
+}
+PEG_REF = {"비트코인": ("KRW-BTC", "BTCUSDT"), "이더리움": ("KRW-ETH", "ETHUSDT")}
+PEG_STD = 0.004     # 최근 60일 일간 수익 차이의 표준편차가 이보다 작으면 그 코인에 묶인 토큰으로 본다
+
+
+def coin_base(market, code):
+    code = str(code).split("#")[0]
+    if market == "upbit":
+        return code.split("-", 1)[-1].upper()
+    return (code[:-4] if code.endswith("USDT") else code).upper()
+
+
+def pegged_major(market, P):
+    """{열 번호: '금'|'비트코인'|…} — 이름 목록 + 값 움직임(비트코인·이더리움과 하루 수익 차이가 거의 0)"""
+    if market not in ("upbit", "binance"):
+        return {}
+    codes = list(P["codes"])
+    out = {}
+    with np.errstate(all="ignore"):
+        r = np.diff(np.log(P["c"].values[-61:]), axis=0)
+    refs = {lab: [codes.index(k) for k in ks if k in codes] for lab, ks in PEG_REF.items()}
+    for j, c in enumerate(codes):
+        b = coin_base(market, c)
+        lab = next((k for k, s in PEG_NAMES.items() if b in s), None)
+        if lab is None:
+            for k, idx in refs.items():
+                for i in idx:
+                    if i == j:
+                        continue
+                    d = r[:, j] - r[:, i]
+                    d = d[np.isfinite(d)]
+                    if len(d) >= 30 and float(np.std(d)) < PEG_STD:
+                        lab = k
+        if lab:
+            out[j] = lab
+    return out
 
 
 def aux_for(market, P, hist_dir, all_groups=False):
@@ -247,6 +296,25 @@ def make_notes(market, bt, cal, qcal, an, ctx):
                   "(동전 던지기 수준)")
         s += ("예요. 시장 전체가 크게 움직이면 범위를 벗어나요. 예측 경로 콘의 중간 날짜는 √시간 비례로 보간한 값이에요.")
         notes.append(s)
+    ek = ctx.get("echk") or {}
+    ea = ek.get("all") or {}
+    if ea:
+        hz = "24시간" if coin and H == 1 else f"{H}{unit}"
+        t5 = ea.get("top5") or {}
+        s = (f"'{hz} 뒤 예상 %'는 '시장 전체 몫'과 '종목 몫'(점수 백분위·종목 변동성·최근 움직임)을 더한 값이고, '10번 중 8번' 범위는 "
+             f"그 둘레로 종목 변동성에 비례해 잡았어요(방법 {ek.get('method')}). 학습에 안 쓴 날짜로 되돌려 맞혀 본 결과"
+             f"({ek.get('from')}~{ek.get('to')}, {ea['n']:,}건): 실제가 범위 안에 든 비율 {_pct0(ea.get('coverage'))}(목표 80%), "
+             f"예상이 1%p 높을 때 실제 평균은 {ea['slope']:.2f}%p 높았고(1이면 딱 맞음), 실제 평균 − 예상 평균 {ea['bias'] * 100:+.2f}%p, "
+             f"오름·내림 방향 맞힘 {_pct0(ea.get('dirHit'))}(실제로 오른 비율 {_pct0(ea.get('upShare'))}).")
+        if t5:
+            s += (f" 점수 상위 10% 안에서 예상이 높은 5개를 매번 골랐다면({t5['n']}회) 평균 {t5['act'] * 100:+.2f}%"
+                  f"(예상 {t5['pred'] * 100:+.2f}%), 같은 때 시장 평균 {t5['mkt'] * 100:+.2f}%, 시장보다 나은 회차 {_pct0(t5.get('beat'))}였어요.")
+        s += " 시장 전체가 오를지 내릴지는 거의 맞히지 못해서 예상 % 는 0% 근처에 모이는 게 정상이에요 — 순위의 힘은 '다른 종목보다 나을 몫'에 있어요."
+        notes.append(s)
+    if ctx.get("peg_list"):
+        pl_ = ctx["peg_list"]
+        notes.append(f"금·비트코인 등에 값이 묶인 토큰 {len(pl_)}개({', '.join(x['name'] for x in pl_[:6])})는 볼 게 없어 순위 목록에서 뺐어요"
+                     "(모형 학습·검증에는 그대로 두었어요).")
     ol_note = outlook_note(market, ctx.get("olbt"))
     if ol_note:
         notes.append(ol_note)
@@ -424,6 +492,32 @@ def run_market(market, uni, hist_dir, out_dir, limit=0, max_days=None, threads=4
         raise RuntimeError("오늘 점수를 매길 종목이 없다")
     order = sorted(in_u, key=lambda i: -pct_all[i])
     n_u = len(order)
+
+    # ── 'H 뒤 예상 %'(절대 수익) + '10번 중 8번' 범위 — 표본 밖 점수·종목 변동성으로 (expret.py, 워크포워드 검증 포함) ──
+    peg = pegged_major(market, P)
+    ex_mid = ex_lo = ex_hi = None
+    echk = None
+    mkt_mid = None
+    try:
+        te0 = time.time()
+        pct_rows = engine.xs_pct(ds, score_oos)
+        pct_rows[rows] = pct_all
+        Dx = expret.prepare(market, H, ds["ti"], ds["si"], ds["fwd"], ds["excess"], pct_rows, P["c"].values,
+                            P["elig"].values, F["vol_20"].values, F["vol_60"].values, F["ret_1"].values,
+                            F["ret_20"].values, M["mkt_ret_20"].values, M["mkt_vol_20"].values, list(P["codes"]),
+                            pl["first_test"], pl["last_lab"], set(peg))
+        ex_mid, ex_lo, ex_hi, ex_lv, echk = expret.run(Dx, P["dates"], rows, log=log)
+        vals = ex_mid[in_u]
+        vals = vals[np.isfinite(vals)]
+        mkt_mid = float(np.median(vals)) if len(vals) else None
+        if echk is not None:
+            echk["level"] = _nz(np.nanmedian(ex_lv)) if np.isfinite(ex_lv).any() else None
+            echk["mktMid"] = mkt_mid
+        log(f"  · 예상 % {time.time() - te0:.0f}초 (오늘 시장 가운데 {_f(mkt_mid, '+.4f')})")
+    except Exception as e:  # 예상 % 가 실패해도 순위는 낸다
+        ex_mid = None
+        log(f"  · 예상 % 실패: {e}")
+        traceback.print_exc()
     C = P["c"].values
     A = P["actual"].values
     dates = P["dates"]
@@ -480,24 +574,37 @@ def run_market(market, uni, hist_dir, out_dir, limit=0, max_days=None, threads=4
         recx = {"close": float(col_c[last]), "atr": rv["atr_14"], "lo20": float(lo20) if math.isfinite(lo20) else None,
                 "dvPct": _nz(rec_dv_pct[j]), "volPct": _nz(pct_vals["vol_60"][j]), "obs": int(P["obs"].iloc[last, j]),
                 "heat": bool(flag_heat[j]), "down": bool(flag_down[j])}
+        # 'H 뒤 예상 %' — mid 예상(분수) · lo~hi 10번 중 8번 · mkt 오늘 시장 전체(가운데 종목) 예상 · edge = mid − mkt
+        er = None
+        if ex_mid is not None and math.isfinite(float(ex_mid[i])) and math.isfinite(float(ex_lo[i])):
+            er = {"h": H, "unit": "d", "mid": float(ex_mid[i]), "lo": float(ex_lo[i]), "hi": float(ex_hi[i]),
+                  "mkt": mkt_mid, "edge": float(ex_mid[i]) - mkt_mid if mkt_mid is not None else None,
+                  "how": (echk or {}).get("method")}
+        why = explain.easy(its, market, n=2)
+        why_all = explain.candidates(its, market, n=6)  # 화면 목록 안에서 '다른 종목과 다른 근거'를 고르는 후보 (recommend.py)
         rec = {"sym": f"{market}:{code}", "name": nm[0], "sub": nm[1], "asOf": as_of, "horizon": H,
                "score": score, "pctRank": round(pct_rank, 1), "grade": verdict, "hold": g is None,
-               "probBeat": pu, "expEx": g["expEx"] if g else None,
+               "probBeat": pu, "expEx": g["expEx"] if g else None, "expRet": er, "why": why,
                "rank": rank, "of": n_u, "probUp": pu,
                "q10": q[0], "q50": q[1], "q90": q[2],
                "cone": engine.cone([float(v) for v in qlog[i]], H),
                "reasons": reasons, "contrib": contribs, "analogs": an_items, "analogStats": an_stats,
-               "outlook": [_hourly_item(hourly, code)] + ol[j]}
+               "outlook": [_hourly_item(hourly, code)] + ol[j],
+               # 최근 종가 (추천 기록 채점용 — collector/picks_log.py): d = 날짜(일봉 기준일), c = 종가
+               "hist": {"d": [str(x.date()) for x in dates[-HIST_N:]], "c": [_nz(x) for x in col_c[-HIST_N:]]}}
+        if j in peg:
+            rec["peg"] = peg[j]
         write_json(out_sym / f"{safe_code(code)}.json", rec)
         written.add(f"{safe_code(code)}.json")
         items.append({"sym": rec["sym"], "name": rec["name"], "sub": rec["sub"], "score": rec["score"], "rank": rank,
                       "pctRank": rec["pctRank"], "grade": verdict, "hold": g is None, "probBeat": pu,
-                      "expEx": rec["expEx"], "rec": recx,
+                      "expEx": rec["expEx"], "expRet": er, "why": why, "whyAll": why_all, "rec": recx,
                       "probUp": pu, "q10": q[0], "q50": q[1], "q90": q[2], "reasons": reasons, "spark": spark,
                       "analog": ({"n": an_stats["n"], "winRate": an_stats["winRate"], "avg": an_stats["avg"]}
                                  if an_stats else None),
                       "outlook": [{"h": o["h"], "unit": o.get("unit", "d"), "label": o["label"], "q50": o["q50"],
                                    "win": o["win"], "grade": o["grade"]} for o in rec["outlook"]],
+                      **({"peg": peg[j]} if j in peg else {}),
                       "_warn": code in warn})
     # 유니버스에서 빠진(또는 오늘 점수에서 뺀) 종목의 지난 결과 파일은 지운다 (오래된 예측이 남아 보이지 않게)
     for p in out_sym.glob("*.json"):
@@ -506,11 +613,24 @@ def run_market(market, uni, hist_dir, out_dir, limit=0, max_days=None, threads=4
                 p.unlink()
             except OSError:
                 pass
-    # 추천 모음(recommend.py)이 상위 10% 전체에서 고를 수 있게 picks 는 최소 상위 10% 까지
-    picks = [x for x in items if not x["_warn"]][:max(N_PICKS, math.ceil(0.1 * n_u))]
-    avoid = sorted(items, key=lambda x: x["rank"], reverse=True)[:N_AVOID]
+    # 추천 모음(recommend.py)이 상위 10% 전체에서 고를 수 있게 picks 는 상위 10% 를 넉넉히 덮게(투자유의·묶인 토큰 제외)
+    pegged_list = [{"sym": x["sym"], "name": x["name"], "peg": x["peg"], "pctRank": x["pctRank"]} for x in items if x.get("peg")]
+    picks = [x for x in items if not x["_warn"] and not x.get("peg")][:max(N_PICKS, math.ceil(0.12 * n_u))]
+    avoid = sorted([x for x in items if not x.get("peg")], key=lambda x: x["rank"], reverse=True)[:N_AVOID]
     for x in items:
         x.pop("_warn", None)
+    keep = {id(x) for x in picks}
+    for x in items:  # 근거 후보는 순위 목록(picks)에만 남긴다 (파일 크기)
+        if id(x) not in keep:
+            x.pop("whyAll", None)
+    # 날짜별 시장 전체 H 수익(그날 점수 대상 전체의 평균·중앙값) — 추천 기록 채점의 '시장 평균' (라벨이 확정된 날만)
+    mkt_ret = []
+    for d in range(max(0, last - H - MKT_RET_N + 1), last - H + 1):
+        f = ds["fwd"][ds["starts"][d]:ds["starts"][d + 1]]
+        f = f[np.isfinite(f)]
+        if len(f) >= 10:
+            mkt_ret.append({"d": str(dates[d].date()), "end": str(dates[d + H].date()), "mean": float(f.mean()),
+                            "med": float(np.median(f)), "n": int(len(f))})
     # 오늘 유니버스 전체에서 평균 |기여(z)| 가 큰 특징 — 모형이 지금 무엇을 보고 줄을 세우는지
     imp = np.abs(z_b[in_u]).mean(axis=0)
     top_feats = [explain.label(ukeys[c], market) for c in np.argsort(-imp)[:4]]
@@ -524,7 +644,8 @@ def run_market(market, uni, hist_dir, out_dir, limit=0, max_days=None, threads=4
     ctx = {"n_extra": n_extra, "warn_n": len([c for c in warn if c in uset]),
            "pegged_n": len(pegged & set(uni["codes"])), "n_adj": P["adjusted"], "top_feats": top_feats,
            "n_short": n_short, "n_lag": len(lag), "as_of": as_of,
-           "hist_years": (dates[-1] - dates[0]).days / 365.25, "olbt": olbt, "bins": bins}
+           "hist_years": (dates[-1] - dates[0]).days / 365.25, "olbt": olbt, "bins": bins,
+           "echk": echk, "peg_list": pegged_list}
     res = {
         "asOf": as_of, "horizon": H, "universe": n_u,
         "model": {"kind": engine.KIND_NAME, "trainedAt": now_iso(), "trainRows": int(n_train), "features": int(ds["Xr"].shape[1])},
@@ -532,6 +653,7 @@ def run_market(market, uni, hist_dir, out_dir, limit=0, max_days=None, threads=4
         "notes": make_notes(market, bt, cal, qcal, an, ctx),
         "picks": picks, "avoid": avoid,
         "grade": verdict,
+        "expCheck": echk, "mktRet": mkt_ret, "pegged": pegged_list,
         "scoreBins": ({"bins": bins["bins"], "reliability": bins["reliability"], "n": bins["n"], "from": bins["from"],
                        "to": bins["to"], "gradeWeight": engine.GRADE_W.get(verdict)} if bins else None),
         "recBacktest": recbt,
@@ -548,6 +670,10 @@ def _nz(x):
     except (TypeError, ValueError):
         return None
     return x if math.isfinite(x) else None
+
+
+def _pct0(x):
+    return "–" if not _fin(x) else f"{float(x) * 100:.0f}%"
 
 
 def _flags_last(P, market):

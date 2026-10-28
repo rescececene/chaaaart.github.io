@@ -176,9 +176,9 @@ export default function NewsPage({ args }: PageProps) {
   let note: string;
   if (!judge) note = '해외 속보는 호재·악재를 판단하지 않고, 관련 종목만 보여 드려요.';
   else if (key === 'notice') note = tags || ai.isLoading
-    ? '업비트·빗썸·바이낸스 공지를 10분마다 모아요. AI가 공지마다 판단하고, AI가 아직 보지 않은 공지는 공지 종류(상장·거래지원 종료·유의 …)로 먼저 판단해요.'
-    : '업비트·빗썸·바이낸스 공지를 10분마다 모아요. 공지 종류(상장·거래지원 종료·유의 …)로 먼저 판단해요.';
-  else if (key === 'social') note = '코인 프로젝트의 공식 텔레그램 공지 채널 글을 10분마다 모아요 (실시간 중계는 아니에요). 사칭 계정이 많으니 채널 이름과 @아이디를 꼭 확인해 주세요. 호재·악재는 AI가 본 글만 표시해요.';
+    ? '업비트·빗썸·바이낸스 공지를 자주(보통 1시간 안쪽) 모아요. AI가 공지마다 판단하고, AI가 아직 보지 않은 공지는 공지 종류(상장·거래지원 종료·유의 …)로 먼저 판단해요.'
+    : '업비트·빗썸·바이낸스 공지를 자주(보통 1시간 안쪽) 모아요. 공지 종류(상장·거래지원 종료·유의 …)로 먼저 판단해요.';
+  else if (key === 'social') note = '코인 프로젝트의 공식 텔레그램 공지 채널 글을 자주(보통 1시간 안쪽) 모아요 (실시간 중계는 아니에요). 사칭 계정이 많으니 채널 이름과 @아이디를 꼭 확인해 주세요. 호재·악재는 AI가 본 글만 표시해요.';
   else if (aiOn && (tags || ai.isLoading)) note = 'AI가 기사마다 호재·악재를 판단해요. AI가 아직 보지 않은 새 기사는 이용자 투표나 키워드로 추정해요.';
   else if (aiOn) note = '이용자 투표나 제목·요약의 단어로 호재·악재를 추정해요. 참고만 해 주세요.';
   else note = '제목에 쓰인 단어로 호재·악재를 추정해요. 참고만 해 주세요.';
@@ -199,12 +199,12 @@ export default function NewsPage({ args }: PageProps) {
     body = (
       <div className={CARD_CLS}>
         <Empty icon={key === 'social' ? <Send /> : <Megaphone />} title="아직 모인 글이 없어요">
-          10분마다 모아요. {key === 'social' ? '코인 공식 텔레그램 채널에 새 글이 올라오면' : '업비트·빗썸·바이낸스에 새 공지가 올라오면'} 여기에 보여 드려요
+          자주(보통 1시간 안쪽) 모아요. {key === 'social' ? '코인 공식 텔레그램 채널에 새 글이 올라오면' : '업비트·빗썸·바이낸스에 새 공지가 올라오면'} 여기에 보여 드려요
         </Empty>
       </div>
     );
   } else if (!items.length) {
-    body = <div className={CARD_CLS}><Empty icon={<Newspaper />} title="이 주제의 뉴스가 아직 없어요">10분마다 새로 모아요. 잠시 뒤 다시 확인해 주세요</Empty></div>;
+    body = <div className={CARD_CLS}><Empty icon={<Newspaper />} title="이 주제의 뉴스가 아직 없어요">자주(보통 1시간 안쪽) 새로 모아요. 잠시 뒤 다시 확인해 주세요</Empty></div>;
   } else if (!shown.length) {
     body = (
       <div className={CARD_CLS}>

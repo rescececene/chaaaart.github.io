@@ -10,6 +10,7 @@ export interface PageProps { args: string[] }
 // 화면별로 코드를 나눠 처음 열 때 필요한 것만 받는다 (차트 라이브러리는 차트 화면에서만)
 const PAGES: Record<string, ComponentType<PageProps>> = {
   recommend: lazy(() => import('@/pages/RecommendPage')),
+  pump: lazy(() => import('@/pages/PumpPage')),
   market: lazy(() => import('@/pages/MarketPage')),
   picks: lazy(() => import('@/pages/PicksPage')),
   chart: lazy(() => import('@/pages/ChartPage')),

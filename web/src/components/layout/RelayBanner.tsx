@@ -14,7 +14,7 @@ export function RelayBanner() {
       <div className="flex items-center gap-2.5 bg-card px-4 py-3 text-[13.5px] break-keep text-secondary-foreground sm:rounded-2xl">
         <CircleAlert className="size-4 shrink-0 text-warn" aria-hidden />
         <span className="min-w-0 flex-1">
-          {!ok ? <>주식 시세가 <b className="font-semibold text-foreground">10~20분 지연</b>된 값이에요.</> : <>실시간 중계 연결에 문제가 있어요 ({err?.message}). 지연 시세로 보여 드려요.</>}
+          {!ok ? <>주식 시세가 <b className="font-semibold text-foreground">늦은(보통 1시간 안쪽)</b> 값이에요.</> : <>실시간 중계 연결에 문제가 있어요 ({err?.message}). 지연 시세로 보여 드려요.</>}
         </span>
         <a href={href('settings', 'relay')} className="shrink-0 font-semibold text-foreground underline-offset-2 hover:underline">설정</a>
       </div>

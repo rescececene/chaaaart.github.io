@@ -192,7 +192,7 @@ export function StrategyBox({ def, stat, stats, market, count, updatedAt }: {
       )}
 
       <p className="mt-2.5 text-[12px] leading-[1.6] break-keep text-muted-foreground">
-        일봉 기준으로 10분마다 다시 판정해요{updatedAt ? ` (${timeAgo(updatedAt)})` : ''}. 과거 통계일 뿐 앞으로도 그렇다는 보장은 없고, 투자 권유가 아니에요.
+        일봉 기준으로 자동 수집 때마다(보통 1시간 안쪽) 다시 판정해요{updatedAt ? ` (${timeAgo(updatedAt)})` : ''}. 과거 통계일 뿐 앞으로도 그렇다는 보장은 없고, 투자 권유가 아니에요.
       </p>
     </section>
   );

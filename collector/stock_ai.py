@@ -1,26 +1,45 @@
-"""종목 AI 해설 — 시장별 주요 종목의 기술적 분석 근거를 AI 가 쉬운 말로 3문장 안팎 정리 (하루 2번 정도)
+"""종목 AI 해설 — 기술적 분석 근거를 AI(Gemma, 무료)가 쉬운 말로 3문장 안팎 정리. 돌려 가며 조금씩
 
-무료 사용량은 뉴스 판단과 함께 쓴다 (cf_ai.Budget, 하루 8,000 뉴런에서 멈춤).
-뉴스가 먼저라서 오늘 사용량이 START_BELOW 를 넘었으면 해설은 건너뛴다.
-비밀값(CF_ACCOUNT_ID / CF_AI_TOKEN)이 없으면 아무것도 하지 않는다.
+클로드는 쓰지 않는다 — 종목 해설은 Gemma 그대로 (사용자 결정 2026-10-28. 클로드는 새 예측 문장만, ai.py).
+비밀값(CF_ACCOUNT_ID / CF_AI_TOKEN)이 없으면 아무것도 하지 않는다 (이전 해설 파일은 그대로).
 
-입력(brief): collect.py 가 일봉 지표를 계산하면서 모은 종목별 요약
+대상 (2026-10-29 '시총과 상관없이 분석해서 알려줘'):
+    업비트 원화 전 종목 + 바이낸스 상위 20 · 국내 상위 30 · 미국 상위 30 (거래대금·시가총액 순, ROTATE_N)
+    + 우선 종목: 추천(recommend.json) · 예측 상위(predict/summary.json 시장별 5) · 펌핑 상위(pump.json 10 — 없거나 모양이 달라도 건너뜀)
+순서: 우선 종목 중 3시간(PRIORITY_HOURS) 지난 것 → 나머지 중 오래된 것(해설이 아직 없는 것)부터.
+      어떤 종목도 3시간(STALE_HOURS) 안에는 다시 하지 않는다.
+양:   무료 사용량은 뉴스 판단·예측 문장과 함께 쓴다 (cf_ai.Budget, 하루 8,000 뉴런 어림 — 뉴스 판단이 먼저).
+      종목 해설은 하루 4,500 뉴런(DAILY) · 오늘 AI 전체 6,000(TOTAL_STOP)까지만. 남은 몫을 그날(UTC) 남은 시간에 고르게 나눠
+      한 실행에 쓸 몫을 정하고(실행은 실제로 40~70분마다), 한 실행 150초(TIME_BUDGET)를 넘기지 않는다.
+      해설 하나 ≈ 5.4 뉴런 (2026-10-28 실측: 약 120개에 643 뉴런) → 하루 800개 안팎.
+
+입력(brief): collect.py 가 일봉 지표를 계산하면서 모은 종목별 요약 — 시장마다 거래대금·시가총액 순으로 TOP_N 개
+    (요약은 계산이 거의 들지 않아 전 종목을 모아 두고, 해설할 종목은 여기서 고른다. 요약이 없는 우선 종목은 건너뛴다)
     {"sym", "name", "market", "price", "chg", "op", "buy", "sell", "neutral", "pos": [...], "neg": [...], "obj": [...]}
 결과: data/stock_ai.json
-    {"updatedAt", "model", "usage": {...}, "items": {"<sym>": {"x": 해설, "s": -2~2, "at": 판단 시각}}}
+    {"updatedAt", "model", "usage": {...}, "items": {"<sym>": {"x": 해설, "s": -2~2, "at": 판단 시각}}, "queue": 차례를 기다리는 수}
+    해설은 48시간(KEEP_HOURS) 동안 남는다 — 이번에 못 한 종목은 이전 해설을 보인다.
 """
 import json
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import cf_ai
 
-TOP_N = {"upbit": 30, "binance": 20, "krx": 30, "us": 30}  # 시장별 해설할 종목 수 (거래대금·시가총액 순)
-STALE_HOURS = 11  # 마지막 해설이 이보다 오래됐을 때만 다시 (10분마다 도는 수집기 안에서 하루 2번 정도)
-START_BELOW = 4500  # 오늘 AI 사용량이 이보다 많으면 해설은 건너뛴다 (뉴스 판단 몫을 남긴다)
+TOP_N = {"upbit": 10_000, "binance": 10_000, "krx": 10_000, "us": 10_000}  # collect.py 가 모을 해설용 요약 수 (사실상 전 종목)
+ROTATE_N = {"upbit": 10_000, "binance": 20, "krx": 30, "us": 30}  # 돌려 가며 해설할 기본 대상 (업비트 원화는 전 종목)
+PRED_TOP, PUMP_TOP = 5, 10  # 우선 종목: 예측 상위(시장별) · 펌핑 상위
+PRIORITY_HOURS = 3  # 우선 종목은 이보다 오래되면 다시
+STALE_HOURS = 3  # 어떤 종목도 이 시간 안에는 다시 하지 않는다
+KEEP_HOURS = 48  # 이보다 오래된 해설은 버린다
+DAILY = 4500  # 종목 해설이 하루(UTC)에 쓰는 뉴런 상한
+TOTAL_STOP = 6000  # 오늘 AI 전체 사용량이 이만큼이면 해설은 멈춘다 (뉴스 판단·예측 문장 몫을 남긴다)
+PER_ITEM = 5.5  # 해설 하나에 드는 뉴런 어림 (이번 실행에서 실제로 잰 값이 생기면 그것)
 BATCH = 5
 TIME_BUDGET = 150
+SYM_RE = re.compile(r"^(upbit|binance|krx|us):[A-Za-z0-9._-]{1,24}$")
 MARKET_NAME = {"upbit": "업비트 코인(원화)", "binance": "바이낸스 코인(USDT)", "krx": "국내주식", "us": "미국주식"}
 
 SYSTEM = """너는 한국 개인 투자자를 위한 차트 분석 해설가다. 종목마다 주어진 기술적 지표 근거만 보고 쉬운 말로 해설한다.
@@ -134,46 +153,129 @@ def parse(text, n):
     return out
 
 
-def pick(briefs):
-    """시장별 상위 종목만 (briefs 는 시장마다 거래대금·시가총액 순으로 들어온다)"""
-    seen, out = {}, []
-    for b in briefs:
-        m = b.get("market")
-        if seen.get(m, 0) < TOP_N.get(m, 0):
-            seen[m] = seen.get(m, 0) + 1
-            out.append(b)
+def _read(path):
+    try:
+        d = json.loads(Path(path).read_text(encoding="utf-8"))
+        return d if isinstance(d, (dict, list)) else {}
+    except Exception:
+        return {}
+
+
+def _syms_in(x, depth=0):
+    """JSON 안의 'sym' 값을 나온 순서대로 (펌핑 파일처럼 모양을 아직 모르는 파일용 · 제외 목록은 건너뜀)"""
+    if depth > 4:
+        return []
+    if isinstance(x, list):
+        return [s for v in x for s in _syms_in(v, depth + 1)]
+    if not isinstance(x, dict):
+        return []
+    out = [x["sym"]] if isinstance(x.get("sym"), str) else []
+    for k, v in x.items():
+        if k not in ("excluded", "exclude", "skipped", "avoid", "history", "past", "backtest", "notes", "all", "universe", "summary", "log"):
+            out += _syms_in(v, depth + 1)
     return out
 
 
+def priority(data_dir):
+    """우선 종목 → [sym …] (추천 → 예측 상위 → 펌핑 상위 순). 파일이 없거나 모양이 달라도 조용히 건너뛴다"""
+    out = []
+
+    def add(s):
+        if isinstance(s, str) and SYM_RE.match(s) and s not in out:
+            out.append(s)
+
+    data_dir = Path(data_dir)
+    groups = _read(data_dir / "recommend.json")
+    groups = groups.get("groups") if isinstance(groups, dict) else None
+    for g in (groups.values() if isinstance(groups, dict) else []):
+        for it in (g.get("items") if isinstance(g, dict) and isinstance(g.get("items"), list) else []):
+            add(it.get("sym") if isinstance(it, dict) else None)
+    markets = _read(data_dir / "predict" / "summary.json")
+    markets = markets.get("markets") if isinstance(markets, dict) else None
+    for m in (markets.values() if isinstance(markets, dict) else []):
+        picks = [p for p in (m.get("picks") if isinstance(m, dict) and isinstance(m.get("picks"), list) else []) if isinstance(p, dict)]
+        picks.sort(key=lambda p: p["rank"] if isinstance(p.get("rank"), (int, float)) else 1e9)
+        for p in picks[:PRED_TOP]:
+            add(p.get("sym"))
+    pump = _read(data_dir / "pump.json")
+    if isinstance(pump, dict):  # 상위 목록(top·items …)이 보이면 그것만, 아니면 파일 안의 sym 을 나온 순서대로 (전 종목 요약은 건너뜀)
+        lst = next((pump[k] for k in ("top", "items", "picks", "rows", "list") if isinstance(pump.get(k), list)), None)
+        pump = lst if lst is not None else pump
+    n0 = len(out)
+    for s in _syms_in(pump):
+        if len(out) - n0 >= PUMP_TOP:
+            break
+        add(s)
+    return out
+
+
+def plan(briefs, items, prio, now=None):
+    """이번에 해설할 차례 → ([brief …], 요약이 없어 건너뛴 우선 종목). 우선 종목 먼저, 다음은 오래된 것(없는 것)부터"""
+    now = time.time() if now is None else now
+    by_sym, seen, pool = {}, {}, []
+    for b in briefs:
+        sym, m = b.get("sym"), b.get("market")
+        if not sym or sym in by_sym:
+            continue
+        by_sym[sym] = b
+        seen[m] = seen.get(m, 0) + 1
+        if seen[m] <= ROTATE_N.get(m, 0):
+            pool.append(sym)
+
+    def age(s):
+        v = items.get(s)
+        at = v.get("at") if isinstance(v, dict) else 0
+        return now - (at if isinstance(at, (int, float)) else 0)
+
+    first = [s for s in prio if s in by_sym and age(s) >= PRIORITY_HOURS * 3600]
+    taken = set(first)
+    rest = sorted((s for s in pool if s not in taken and age(s) >= STALE_HOURS * 3600), key=lambda s: -age(s))  # 안정 정렬 — 같으면 상위 종목 먼저
+    return [by_sym[s] for s in first + rest], [s for s in prio if s not in by_sym]
+
+
+def allowance(budget, now=None):
+    """이번 실행에 종목 해설로 쓸 뉴런 — 오늘 남은 몫을 그날(UTC) 남은 시간에 고르게 (실행은 대략 1시간에 한 번)"""
+    left = min(DAILY - budget.used_by("stock"), TOTAL_STOP - budget.used, budget.left())
+    if left <= 0:
+        return 0.0
+    d = datetime.fromtimestamp(time.time() if now is None else now, timezone.utc)
+    hours_left = 24 - d.hour - d.minute / 60
+    return left / max(1.0, hours_left)
+
+
 def run(briefs, path, usage_path=None, force=False):
+    """해설할 차례인 종목을 이번 실행 몫만큼 해설해 path 에 저장한다 (force: 몫·시간 간격 무시 — 손으로 돌려 볼 때)"""
     if not cf_ai.enabled():
         print("[종목 AI] CF_ACCOUNT_ID / CF_AI_TOKEN 이 없어 건너뜀")
         return
     db = load(path)
-    last = db.get("updatedAt")
-    if not force and last:
-        try:
-            age = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() / 3600
-            if age < STALE_HOURS:
-                return  # 아직 새것 — 조용히 건너뛴다
-        except ValueError:
-            pass
+    old = db.get("items") or {}
+    todo, missing = plan(briefs, {} if force else old, priority(Path(path).parent))
+    if missing:
+        print(f"[종목 AI] 요약이 없어 건너뛴 우선 종목 {len(missing)}개: {', '.join(missing[:6])}")
+    if not todo:
+        return  # 모두 3시간 안에 해설함 — 조용히 건너뛴다
     budget = cf_ai.Budget(usage_path or Path(path).with_name("ai_usage.json"))
-    if not force and budget.used >= START_BELOW:
-        print(f"[종목 AI] 오늘 AI 사용량 어림 {budget.used:.0f} 뉴런 — 뉴스 몫을 남기려고 건너뜀")
-        return
-    todo = pick(briefs)
-    items, t0, done, err = {}, time.time(), 0, ""
+    allow = float("inf") if force else allowance(budget)
+    items, t0, done, spent, asked, err = {}, time.time(), 0, 0.0, 0, ""
     try:
         for i in range(0, len(todo), BATCH):
+            batch = todo[i:i + BATCH]
+            per = spent / asked if asked else PER_ITEM
+            if spent + per * len(batch) > allow:
+                if not force and budget.used_by("stock") >= DAILY:
+                    err = f"오늘 해설 몫 {DAILY:,} 뉴런을 다 씀 — 내일(UTC) 다시"
+                elif not force and budget.used >= TOTAL_STOP:
+                    err = f"오늘 AI 전체 {budget.used:,.0f} 뉴런 — 뉴스 판단 몫을 남기려고 멈춤"
+                break  # 이번 실행 몫을 다 씀 — 다음 실행에 이어서
             if budget.left() <= 0:
                 raise cf_ai.Stop(f"오늘 무료 사용량 어림 {budget.used:.0f} 뉴런 — 내일(UTC) 다시")
             if time.time() - t0 > TIME_BUDGET:
-                raise cf_ai.Stop("이번 실행 시간 초과")
-            batch = todo[i:i + BATCH]
+                raise cf_ai.Stop("이번 실행 시간 초과 — 다음 실행에 이어서")
             user = f"종목 {len(batch)}개\n\n" + "\n\n".join(f"[{j}]\n{describe(b)}" for j, b in enumerate(batch))
             text, neurons = cf_ai.chat(SYSTEM, user, max_tokens=170 * len(batch) + 100, temperature=0.2)
             budget.add("stock", neurons)
+            spent, asked = spent + neurons, asked + len(batch)
             try:
                 got = parse(text, len(batch))
             except ValueError:
@@ -185,15 +287,16 @@ def run(briefs, path, usage_path=None, force=False):
     except cf_ai.Stop as e:
         err = str(e)
         print(f"[종목 AI] 멈춤: {err}")
-    budget.save()
-    if not items and err:  # 한 개도 못 했으면 이전 해설을 그대로 둔다 (다음 실행에 다시)
+    if not items:  # 한 개도 못 했으면 이전 해설 파일을 그대로 둔다 (다음 실행에 다시)
+        if err:
+            print(f"[종목 AI] 이번엔 해설 못 함 — {err}")
         return
-    # 이번에 못 한 종목은 이전 해설을 남긴다 (36시간 넘은 것은 버린다)
-    keep_after = time.time() - 36 * 3600
-    for sym, v in (db.get("items") or {}).items():
+    # 이번에 못 한 종목은 이전 해설을 남긴다 (48시간 넘은 것은 버린다)
+    keep_after = time.time() - KEEP_HOURS * 3600
+    for sym, v in old.items():
         if sym not in items and isinstance(v, dict) and v.get("at", 0) > keep_after:
             items[sym] = v
-    out = {"updatedAt": now_iso(), "model": cf_ai.MODEL, "usage": budget.snapshot(), "items": items}
+    out = {"updatedAt": now_iso(), "model": cf_ai.MODEL, "usage": budget.snapshot(), "items": items, "queue": len(todo) - done}
     if err:
         out["error"] = cf_ai.scrub(err)[:300]
     p = Path(path)
@@ -201,4 +304,5 @@ def run(briefs, path, usage_path=None, force=False):
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     tmp.replace(p)
-    print(f"[종목 AI] {len(todo)}종목 중 {done}개 해설 / 오늘 AI 전체 어림 {budget.used:.0f} 뉴런 / {time.time() - t0:.0f}초")
+    print(f"[종목 AI] 차례 {len(todo)}종목 중 {done}개 해설 · 이번 {spent:.0f} 뉴런(몫 {allow:.0f}) / "
+          f"해설 오늘 {budget.used_by('stock'):.0f} · AI 전체 {budget.used:.0f} 뉴런 / {time.time() - t0:.0f}초")

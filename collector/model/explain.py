@@ -178,6 +178,159 @@ def sentence(key, v, pct, market, hist=None, mkt=None):
     return f"{LABELS.get(key, key)} {v:.3g}"
 
 
+def _side(pct):
+    """시장 안 백분위 → ('lo'|'hi', '전체 하위 12%') — 가운데 40% 는 (None, '')"""
+    if pct is None or not math.isfinite(pct):
+        return None, ""
+    if pct >= 0.7:
+        return "hi", f"전체 상위 {max(1, round((1 - pct) * 100))}%"
+    if pct <= 0.3:
+        return "lo", f"전체 하위 {max(1, round(pct * 100))}%"
+    return None, ""
+
+
+def easy_one(key, v, pct, market):
+    """특징 하나 → 짧고 쉬운 한 줄. '무엇보다 어떻다'를 숫자로 (전문 용어는 괄호로만). 없으면 None"""
+    if v is None or not math.isfinite(v):
+        return None
+    coin = market in COIN
+    u = _unit(market)
+    who = "코인" if coin else "종목"
+    side, pos = _side(pct)
+    if key == "kp_rel":
+        if abs(v) < 0.0005:
+            return None
+        return f"해외 거래소 값보다 붙는 웃돈(김프)이 다른 코인보다 {abs(v) * 100:.1f}%p {'낮아요' if v < 0 else '높아요'}"
+    if key == "kp_chg5":
+        if abs(v) < 0.0005:
+            return None
+        return f"해외 값보다 붙는 웃돈(김프)이 최근 5{u} 새 {abs(v) * 100:.1f}%p {'줄었어요' if v < 0 else '커졌어요'}"
+    if key in ("atr_14", "vol_20", "vol_60", "ivol_60"):
+        if not side:
+            return None
+        what = {"atr_14": "하루 평균 출렁임", "vol_20": "최근 20일 하루 흔들림", "vol_60": "최근 60일 하루 흔들림",
+                "ivol_60": "시장과 따로 노는 하루 흔들림"}[key]
+        return f"{what}이 {v * 100:.1f}%로 다른 {who}보다 {'커요' if side == 'hi' else '작아요'} ({pos})"
+    if key in ("volu_1_20", "volu_5_20", "volu_20_60"):
+        if 0.8 <= v <= 1.25:
+            return None
+        span = {"volu_1_20": "어제" if coin else "전 거래일", "volu_5_20": f"최근 5{u}", "volu_20_60": f"최근 20{u}"}[key]
+        ref = f"60{u} 평균" if key == "volu_20_60" else f"20{u} 평균"
+        return f"{span} 거래량이 {ref}의 {v:.1f}배로 {'늘었어요' if v > 1 else '줄었어요'}"
+    if key.startswith("gap_ma"):
+        n = key[6:]
+        if abs(v) < 0.005:
+            return None
+        return f"가격이 {n}{u} 평균보다 {abs(v) * 100:.1f}% {'높아요' if v > 0 else '낮아요'}" + (" (짧게 눌림)" if v < 0 and n == "5" else "")
+    if key == "ret_1":
+        return f"{'어제' if coin else '전 거래일'} {abs(v) * 100:.1f}% {'올랐어요' if v > 0 else '내렸어요'}" if abs(v) >= 0.001 else None
+    if key == "ret_5":
+        return f"최근 5{u} {v * 100:+.1f}% {'오른' if v > 0 else '빠진'} 뒤예요" if abs(v) >= 0.01 else None
+    if key in ("ret_20", "ret_60", "ret_120", "ret_250"):
+        return f"최근 {key[4:]}{u} {v * 100:+.1f}% {'올랐어요' if v > 0 else '내렸어요'}" if abs(v) >= 0.01 else None
+    if key == "mom_12_1":
+        return f"1년 흐름(최근 한 달 빼고) {v * 100:+.0f}%"
+    if key == "rsi_14":
+        return (f"최근 많이 올라 과열 쪽이에요 (RSI {v:.0f})" if v >= 70 else
+                f"많이 내려 바닥 쪽이에요 (RSI {v:.0f})" if v <= 30 else None)
+    if key == "beta_60":
+        if not side:
+            return None
+        return f"시장이 1% 움직일 때 평균 {v:.1f}% 따라 움직였어요 ({pos})"
+    if key == "mdd_60":
+        if not side:
+            return None
+        return f"최근 60{u} 고점에서 가장 크게 빠진 폭이 {abs(v) * 100:.0f}%로 다른 {who}보다 {'작아요' if side == 'hi' else '커요'}"
+    if key == "min_ret_20":
+        if not side:
+            return None
+        return f"최근 20{u} 하루 최대 하락이 {abs(v) * 100:.1f}%로 다른 {who}보다 {'작아요' if side == 'hi' else '커요'}"
+    if key == "max_ret_20":
+        return f"최근 20{u} 하루에 가장 크게 오른 날이 {v * 100:+.1f}%예요"
+    if key == "hi_52w":
+        return f"1년 고점보다 {abs(v) * 100:.0f}% 낮아요" if v < -0.01 else "1년 고점 근처예요"
+    if key == "lo_52w":
+        return f"1년 저점보다 {v * 100:.0f}% 높아요"
+    if key == "macd_hist":
+        return f"단기 흐름(MACD)이 {'힘을 얻는' if v > 0 else '약해지는'} 중이에요"
+    if key == "slope_ma20":
+        return f"20{u} 평균 가격이 최근 5{u} 새 {v * 100:+.1f}% 움직였어요" if abs(v) >= 0.005 else None
+    if key == "slope_ma60":
+        return f"60{u} 평균 가격이 최근 20{u} 새 {v * 100:+.1f}% 움직였어요" if abs(v) >= 0.005 else None
+    if key == "stoch_14":
+        return ("가격이 최근 2주 범위의 위쪽 끝에 있어요" if v >= 80 else "가격이 최근 2주 범위의 아래쪽 끝에 있어요" if v <= 20 else None)
+    if key == "clv_5":
+        return ("최근 5일 대부분 하루 범위의 위쪽에서 마감했어요" if v >= 0.65 else
+                "최근 5일 대부분 하루 범위의 아래쪽에서 마감했어요" if v <= 0.35 else None)
+    if key in ("up_20", "up_60"):
+        return f"최근 {key[3:]}{u} 중 {v * 100:.0f}%가 오른 날이에요"
+    if key == "intra_20":
+        return f"최근 20{u} 장 중(시작가→마감가)에는 {v * 100:+.1f}% 움직였어요"
+    if key == "gap_20":
+        return f"최근 20{u} 장 시작 때(밤사이) {v * 100:+.1f}% 움직였어요" if not coin else None
+    if key == "ram_60":
+        return f"흔들림에 비해 최근 60{u} 수익이 {'좋은' if v > 0 else '나쁜'} 편이에요" if side else None
+    if key == "amihud_20":
+        return (f"적은 거래에도 가격이 크게 움직이는 편이에요 ({pos})" if side == "hi" else
+                f"거래가 많아 가격이 덜 흔들리는 편이에요 ({pos})" if side == "lo" else None)
+    if key == "ma_align":
+        return ("이동평균이 오름 차례로 늘어서 있어요 (정배열)" if v >= 3 else
+                "이동평균이 내림 차례로 늘어서 있어요 (역배열)" if v <= -3 else None)
+    if key == "bb_pctb":
+        return ("가격이 볼린저 밴드 아래쪽 끝에 있어요" if v < 0.1 else "가격이 볼린저 밴드 위쪽 끝에 있어요" if v > 0.9 else None)
+    if key == "dv_20":
+        return f"하루 거래대금이 {_won(math.exp(v), market)}으로 다른 {who}보다 {'많아요' if side == 'hi' else '적어요'} ({pos})" if side else None
+    if key == "dv_trend":
+        return f"최근 5{u} 거래대금이 60{u} 평균의 {v:.1f}배예요" if not 0.8 <= v <= 1.25 else None
+    if key in ("frgn_d5", "frgn_d20"):
+        return f"외국인 보유율이 {key[6:]}거래일 새 {v:+.1f}%p 바뀌었어요" if abs(v) >= 0.05 else None
+    if key == "skew_60":
+        return ("최근 60일 가끔 크게 튀어 오르는 편이었어요" if v > 0.3 else
+                "최근 60일 가끔 크게 빠지는 편이었어요" if v < -0.3 else None)
+    if key.startswith("mkt_") or key in ("btc_ret_20", "age", "bb_width", "vol_ratio"):
+        return None
+    return sentence(key, v, pct, market)
+
+
+def candidates(items, market, n=6):
+    """모형이 이 종목 점수를 올린 근거(기여 z > 0) 중 쉬운 말이 있는 것 n 개 → [{k, t, p, z}] (기여 큰 순)
+    k 특징 키 · t 쉬운 문장(숫자 포함) · p 그날 시장 안 백분위(0~1, 없으면 None) · z 모형 점수 기여(표준화)
+    — 추천 모음(recommend.py)이 화면 목록 안에서 '다른 종목과 다른 근거'를 고를 때 쓴다"""
+    items = [x for x in items if x[1] is not None and math.isfinite(x[1]) and math.isfinite(x[4]) and x[4] > 0]
+    items.sort(key=lambda x: -x[4])
+    out, seen = [], set()
+    for k, v, pct, _, z in items:
+        t = easy_one(k, v, pct, market)
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        p = round(float(pct), 3) if pct is not None and math.isfinite(pct) else None
+        out.append({"k": k, "t": t, "p": p, "z": round(float(z), 3)})
+        if len(out) >= n:
+            break
+    return out
+
+
+def easy(items, market, n=2, side=None):
+    """모형이 이 종목 점수를 올린(side='up', 기본) 이유 n 줄 — 쉬운 말. items = [(key, value, pct, impact, z)]"""
+    items = [x for x in items if x[1] is not None and math.isfinite(x[1]) and math.isfinite(x[4])]
+    tot = sum(x[4] for x in items)
+    side = side or ("up" if tot >= 0 else "down")
+    pool = sorted(items, key=lambda x: -x[4] if side == "up" else x[4])
+    out, seen = [], set()
+    for k, v, pct, _, z in pool:
+        if (z <= 0 if side == "up" else z >= 0):
+            break
+        t = easy_one(k, v, pct, market)
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        out.append({"text": t, "tone": side, "key": k})
+        if len(out) >= n:
+            break
+    return out
+
+
 def tone(z, top_abs):
     """모형 점수를 올린 쪽(up)/내린 쪽(down). 가장 큰 기여의 15% 도 안 되면 flat"""
     if not math.isfinite(z) or abs(z) < max(0.02, 0.15 * top_abs):
