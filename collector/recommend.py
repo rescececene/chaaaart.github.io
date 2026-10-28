@@ -378,7 +378,7 @@ def score_block(m, r, L):
 # ── AI 한 문장 (업비트 상위 5개, 기준일마다 1번) ──────────────────────────────
 AI_SYSTEM = (
     "너는 코인 순위표 옆에 붙는 짧은 설명을 쓴다. 주어진 숫자만 근거로, 이 코인이 오늘 다른 코인보다 순위가 높게 나온 까닭을 "
-    "쉬운 한국어 해요체 한 문장(35~55자)으로 쓴다.\n"
+    "쉬운 한국어 해요체 한 문장(30~48자)으로 쓴다.\n"
     "규칙: 사세요·추천·오를 거예요·확실·기회 같은 말 금지(가격이 오른다고 말하지 말 것). 주어진 숫자에 없는 사실(뉴스·호재·프로젝트 이야기)을 지어내지 않는다. "
     "전문 용어는 풀어 쓴다(예: ATR → 하루 출렁임, 김치 프리미엄 → 해외보다 비싸게/싸게 거래). 이모지·따옴표·숫자 나열 금지. "
     "'주의' 항목이 있으면 문장 끝에 짧게 덧붙인다(예: ', 다만 거래가 적어요'). "
@@ -534,6 +534,13 @@ def _exp_field(m, p, fc_grade):
             "edge": _r(er.get("edge"), 6), "grade": fc_grade}
 
 
+def _sig(t):
+    """같은 숫자를 되풀이하는 근거 거르기용 — '최근 5거래일 -5.3%'처럼 첫 % 숫자까지 (띄어쓰기·부호 모양 무시)"""
+    t = re.sub(r"\s+", "", str(t)).replace("−", "-")
+    m_ = re.search(r"[+-]?\d+(?:\.\d+)?%", t)
+    return t[:m_.end()] if m_ else t
+
+
 def rec_item(m, p, r, row, extra=None):
     """추천 화면 카드 하나 (예전 모양 + expRet·cautions)"""
     H = r.get("horizon")
@@ -550,15 +557,24 @@ def rec_item(m, p, r, row, extra=None):
     if pr is not None:
         reasons.append({"text": f"과거 같은 점수 구간 종목의 {pr * 100:.0f}%가 {H}{u} 동안 시장 중앙값을 이겼어요 "
                                 f"(검증 등급 반영, 초과수익 중앙값 {e.get('q50', 0) * 100:+.2f}%p{rng})", "tone": "up"})
+    seen = set()
+
+    def add(text, tone):  # 같은 숫자를 다른 말로 되풀이하는 근거는 하나만 ('최근 5거래일 -5.3% 빠진 뒤예요' · '최근 5거래일 -5.3% — 시장보다…')
+        k = _sig(text)
+        if k in seen:
+            return False
+        seen.add(k)
+        reasons.append({"text": text, "tone": tone})
+        return True
+
     for x in p.get("why") or []:
         if len(reasons) < 3:
-            reasons.append({"text": x["text"], "tone": "up"})
+            add(x["text"], "up")
     for x in p.get("reasons") or []:
         if x.get("tone") == "up" and len(reasons) < 4:
-            reasons.append({"text": x["text"], "tone": "up"})
+            add(x["text"], "up")
     for x in p.get("reasons") or []:
-        if x.get("tone") == "down" and len(reasons) < 5:
-            reasons.append({"text": x["text"], "tone": "down"})
+        if x.get("tone") == "down" and len(reasons) < 5 and add(x["text"], "down"):
             break
     risks = []
     if atr and stop_pct is not None:

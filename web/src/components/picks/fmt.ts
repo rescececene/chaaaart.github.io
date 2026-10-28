@@ -48,8 +48,9 @@ export const MKT_ALL: Record<Market, string> = { upbit: '업비트 전체', bina
 
 /** 예상 % 검증 등급이 약하면 먼저 알리는 한 줄 */
 export function fcWarn(grade: FcGrade | null | undefined, hLabel = '24시간'): string | null {
-  if (grade === 'poor') return `이 시장의 '${hLabel} 뒤 예상 %'는 과거로 되돌려 보니 '0%'라고 하는 것보다 잘 맞지 않았어요. 숫자보다 범위(흔들림 크기)를 보세요.`;
-  if (grade === 'weak') return `이 시장의 '${hLabel} 뒤 예상 %'는 과거에 '0%'라고 하는 것보다 조금 나은 정도였어요. 참고만 하세요.`;
+  const what = hLabel === '다음 거래일' ? '다음 거래일 마감 예상 %' : `${hLabel} 뒤 예상 %`;
+  if (grade === 'poor') return `이 시장의 '${what}'는 과거로 되돌려 보니 '0%'라고 하는 것보다 잘 맞지 않았어요. 숫자보다 범위(흔들림 크기)를 보세요.`;
+  if (grade === 'weak') return `이 시장의 '${what}'는 과거에 '0%'라고 하는 것보다 조금 나은 정도였어요. 참고만 하세요.`;
   return null;
 }
 

@@ -35,5 +35,6 @@ describe('순위 표기', () => {
     expect(fcWarn('good')).toBeNull();
     expect(fcWarn('weak', '24시간')).toContain('조금 나은 정도');
     expect(fcWarn('poor', '20거래일')).toContain("'20거래일 뒤 예상 %'");
+    expect(fcWarn('weak', '다음 거래일')).toContain("'다음 거래일 마감 예상 %'");
   });
 });
