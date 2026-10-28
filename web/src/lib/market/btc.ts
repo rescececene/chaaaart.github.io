@@ -1,5 +1,8 @@
-// 비트코인 카드 데이터 — collector/btc_forecast.py 가 수집할 때마다 만드는 data/btc.json (작은 정적 파일, 중계 요청 없음)
+// 비트코인 카드 데이터 — collector/btc_forecast.py 가 수집할 때마다 만드는 data/btc.json (작은 정적 파일)
+// + 1시간 예측용 업비트 시간봉(upbitHours200, 한 시간에 한 번 — 중계 우선)
 // 변화율(med·lo·hi·actual)은 모두 분수(0.012 = +1.2%), 가격은 원.
+import { sleep, upbitSlot } from './core';
+import { Relay } from './relay';
 import { staticJSON } from './staticData';
 
 export const BTC_SYM = 'upbit:KRW-BTC';
@@ -162,18 +165,31 @@ export const btcH1Model = () => staticJSON<BtcH1Model>('btc_h1.json', 30 * 60e3)
 
 /** 업비트 60분봉 응답 한 줄 */
 export interface UpbitHourRaw { candle_date_time_utc: string; opening_price: number; high_price: number; low_price: number; trade_price: number; candle_acc_trade_price: number }
-/** 업비트 원화 비트코인 60분봉 200개 — 브라우저에서 직접 (중계 안 거침). 업비트 브라우저 요청 한도(분당 6회)에 걸리면
- *  CORS 헤더 없는 429 라 TypeError 로 보이므로 15초 쉬고 두 번까지 다시 */
+/** 업비트 원화 비트코인 60분봉 200개 — 중계가 있으면 중계로(제한 없음, 한 시간에 한 번), 없거나 실패하면 브라우저에서 직접.
+ *  직접 부를 땐 업비트 브라우저 한도(IP 당 10초 1번, 웹소켓 접속과 같은 몫)를 차례 줄(upbitSlot)로 지킨다 —
+ *  화면을 열면 실시간 시세 웹소켓이 먼저 접속해서, 바로 부르면 CORS 헤더 없는 429(브라우저에선 TypeError)를 받는다 */
 export async function upbitHours200(): Promise<UpbitHourRaw[]> {
-  for (let attempt = 0; ; attempt++) {
+  const path = 'candles/minutes/60';
+  const q = { market: 'KRW-BTC', count: 200 };
+  if (Relay.ok()) {
     try {
-      const r = await fetch('https://api.upbit.com/v1/candles/minutes/60?market=KRW-BTC&count=200', { cache: 'no-store' });
+      const d = await Relay.json<UpbitHourRaw[]>('upbit', path, q);
+      if (Array.isArray(d) && d.length) return d;
+    } catch { /* 중계가 안 되면 직접 */ }
+  }
+  // 화면을 막 연 참이면 실시간 시세 웹소켓이 먼저 차례를 잡게 잠깐 비켜 준다 (시세가 10초 늦는 것보다 1시간 예상이 늦는 게 낫다)
+  const grace = 4000 - performance.now();
+  if (grace > 0) await sleep(grace);
+  for (let attempt = 0; ; attempt++) {
+    const wait = upbitSlot();
+    if (wait > 0) await sleep(wait);
+    try {
+      const r = await fetch(`https://api.upbit.com/v1/${path}?market=${q.market}&count=${q.count}`, { cache: 'no-store' });
       if (!r.ok) throw Object.assign(new Error(`업비트 ${r.status}`), { status: r.status });
       return (await r.json()) as UpbitHourRaw[];
     } catch (e) {
       const st = (e as { status?: number }).status;
       if (attempt >= 2 || (st && st !== 429 && st < 500)) throw e;
-      await new Promise((res) => setTimeout(res, 15_000));
     }
   }
 }

@@ -20,6 +20,16 @@ export const Store = {
 };
 
 export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// 업비트는 브라우저 요청(Origin 이 붙은 요청)을 IP 당 10초에 1번쯤만 받는다 — 웹소켓 접속과 REST 가 같은 몫을 쓴다.
+// 부딪치면 CORS 헤더 없는 429 가 와서 브라우저에선 원인 모를 실패로 보이므로, 둘이 한 줄로 차례를 잡는다.
+const upbitGate = { next: 0 };
+/** 업비트 직접 요청(웹소켓 접속 포함) 차례를 잡고, 그 차례까지 기다릴 ms 를 돌려준다. minWait = 최소 대기 */
+export function upbitSlot(minWait = 0): number {
+  const now = Date.now(), at = Math.max(now + minWait, upbitGate.next);
+  upbitGate.next = at + 10_500;
+  return at - now;
+}
 export function split(sym: Sym): [Market, string] {
   const i = sym.indexOf(':');
   return [sym.slice(0, i) as Market, sym.slice(i + 1)];

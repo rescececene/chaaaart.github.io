@@ -2,7 +2,7 @@
 //  업비트: 중계 우선(제한 없음), 없으면 직접(브라우저 요청은 IP당 10초 1번 → 간격 두고 세 번까지)
 //  바이낸스: 직접 / 국내·미국 일봉 이상: 네이버(중계) → 실패하거나 중계가 없으면 GitHub Actions 가 저장한 일봉
 //  국내 분봉: 네이버(중계) / 미국 분봉: 야후(중계, 3분봉은 1분봉을 합침)
-import { dedupe, getJSON, groupBars, NeedRelay, sleep, split, wallTs, ymdTs } from './core';
+import { dedupe, getJSON, groupBars, NeedRelay, sleep, split, upbitSlot, wallTs, ymdTs } from './core';
 import { nameOf } from './names';
 import { Relay } from './relay';
 import { staticJSON } from './staticData';
@@ -22,7 +22,6 @@ const UPBIT_PATH: Record<Interval, string> = {
   '1h': 'minutes/60', '4h': 'minutes/240', '1d': 'days', '1w': 'weeks', '1M': 'months',
 };
 const UPBIT_BLOCKED = '업비트가 잠시 요청을 막았습니다 — 같은 인터넷에서 여러 기기·탭으로 열면 생길 수 있어요. 잠시 뒤 다시 시도해 주세요.';
-const upbitGate = { next: 0 };
 type OnWait = (sec: number) => void;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -31,9 +30,8 @@ async function upbitGet(path: string, onWait?: OnWait): Promise<any> {
     try { return await Relay.json('upbit', path); } catch (e) { const s = (e as { status?: number }).status; if (s !== 429 && s !== 502) throw e; }
   }
   for (let attempt = 0; ; attempt++) {
-    const now = Date.now(), at = Math.max(now, upbitGate.next);
-    upbitGate.next = at + 10500;
-    if (at > now) { onWait?.(Math.ceil((at - now) / 1000)); await sleep(at - now); }
+    const wait = upbitSlot(); // 웹소켓 접속과 같은 차례 줄 (core.ts)
+    if (wait > 0) { onWait?.(Math.ceil(wait / 1000)); await sleep(wait); }
     try {
       return await getJSON('https://api.upbit.com/v1/' + path);
     } catch (e) {

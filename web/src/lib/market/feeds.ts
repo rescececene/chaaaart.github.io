@@ -3,7 +3,7 @@
 //  - 바이낸스: 웹소켓 종목별 24시간 미니 티커 + 호가 20단계 스트림
 //  - 주식: 중계(Worker)로 네이버 실시간 시세를 2.5초마다, 없으면 10분 단위 정적 데이터
 import { isIdle, onWake } from './activity';
-import { getJSON, num, split } from './core';
+import { getJSON, num, split, upbitSlot } from './core';
 import { binanceTop, remember, upbitCodes } from './names';
 import { getQuote, hasQuote, onWantsChange, putQuote, wanted } from './quotes';
 import { Relay } from './relay';
@@ -74,7 +74,8 @@ const UpbitLive = {
   },
   open() {
     if (this.ws || this.timer) return;
-    const wait = Math.max(0, this.lastOpen + 11000 - Date.now()); // 업비트는 브라우저 접속을 10초 간격으로 제한
+    // 업비트는 브라우저 접속을 10초 간격으로 제한 — REST(시간봉 등)와 같은 차례 줄을 쓴다
+    const wait = upbitSlot(Math.max(0, this.lastOpen + 11000 - Date.now()));
     this.timer = setTimeout(() => {
       this.timer = null;
       if (!this.codes.length && !this.books.length) return;
