@@ -13,6 +13,7 @@ import { SymbolLogo } from '@/components/common/SymbolLogo';
 import { Sparkline } from '@/components/common/Sparkline';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ReasonText } from '@/components/chart/ForecastPanel';
+import { minusFix } from '@/components/picks/fmt';
 import { CoinExSwitch } from '@/components/market/CoinVenues';
 import { dayUnit, GradeBadge } from '@/components/picks/score';
 import { EquityChart } from '@/components/picks/EquityChart';
@@ -114,7 +115,7 @@ const RankCard = memo(function RankCard({ it, market, hLabel, poor }: { it: Rank
         <ul className="mt-2.5 space-y-0.5">
           {lines.map((t, i) => (
             <li key={i} className="relative pl-3.5 text-[13.5px] leading-5 break-keep text-secondary-foreground before:absolute before:top-[8px] before:left-0.5 before:size-1 before:rounded-full before:bg-muted-foreground/70">
-              {i === 0 && it.ai ? t : <ReasonText text={t} />}
+              {i === 0 && it.ai ? minusFix(t) : <ReasonText text={t} />}
             </li>
           ))}
         </ul>

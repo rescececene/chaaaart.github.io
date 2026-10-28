@@ -1975,7 +1975,9 @@ def make_risks(x, res, info, tick, news, ages, stats, ev_recent):
 AI_SYS = ("너는 업비트 코인 데이터를 쉬운 한국어로 설명하는 사람이야. 해요체로 1~2문장, 130자 안으로 써. "
           "주어진 숫자만 쓰고 새 숫자를 지어내지 마. '사세요·파세요·오를 거예요·추천' 같은 권유나 장담은 절대 하지 마. "
           "왜 점수가 높은지(근거)와 조심할 점(위험)을 함께 말해. 이모지·느낌표 쓰지 마. "
-          "점수를 말할 때는 화면의 큰 숫자인 '후보 점수'(급락 위험을 뺀 점수)를 쓰고, 펌핑 점수와 차이가 크면 급락 위험 때문이라고 말해.")
+          "점수를 말할 때는 화면의 큰 숫자인 '후보 점수'(급락 위험을 뺀 점수)를 써. 펌핑 점수와의 차이는 '두 점수 차이' 항목이 있을 때만, "
+          "그 항목에 적힌 방향 그대로 말해(방향을 바꾸거나 지어내지 마).")
+AI_VER = "v2"  # 문장 규칙(AI_SYS·facts)을 바꾸면 올린다 — 예전 규칙으로 쓴 저장 문장을 다시 쓰게
 AI_BAN = ("사세요", "매수하", "파세요", "매도하", "오를 거", "오를 것", "추천", "확실", "보장", "!")
 
 
@@ -1995,6 +1997,16 @@ def rule_text(it, stats):
     return " ".join(u.rstrip(".") + "." for u in ups) + f" 다만 {tail}."
 
 
+def _gap_text(it):
+    """후보 점수와 펌핑 점수가 10점 넘게 다를 때 그 방향과 까닭 (AI 가 방향을 거꾸로 말하지 않게 코드가 정한다)"""
+    d = it["cand"] - it["score"]
+    if d >= 10:
+        return f"후보 점수({round(it['cand'])})가 펌핑 점수({round(it['score'])})보다 높아요 — 급락 확률이 다른 코인보다 낮아서예요"
+    if d <= -10:
+        return f"후보 점수({round(it['cand'])})가 펌핑 점수({round(it['score'])})보다 낮아요 — 급락 확률이 다른 코인보다 높아서예요"
+    return None
+
+
 def ai_texts(items, state, stats, now, max_calls=5):
     """상위 10개(화면 순서대로) — 후보 점수 10점 칸·앞쪽 근거 2개·위험 단계가 바뀌었거나 48시간이 지났을 때만 새로 쓴다
     (ai.write: 클로드 하이쿠 → 안 되면 무료 Gemma → 둘 다 안 되면 None 이라 규칙 문장). 한 실행 최대 max_calls 번."""
@@ -2006,7 +2018,7 @@ def ai_texts(items, state, stats, now, max_calls=5):
     calls = 0
     top = ((stats or {}).get("bucketsCand") or [{}])[0]
     for it in items:
-        key = "|".join([str(int(it["cand"] // 10)), ",".join(r["k"] for r in it["reasons"][:2]),
+        key = "|".join([AI_VER, str(int(it["cand"] // 10)), ",".join(r["k"] for r in it["reasons"][:2]),
                         str(max([r["lv"] for r in it["risks"]] or [0]))])
         c = cache.get(it["code"])
         if c and c.get("key") == key and now - c.get("at", 0) < 48 * HOUR and c.get("by") != "rule":
@@ -2016,6 +2028,7 @@ def ai_texts(items, state, stats, now, max_calls=5):
         if ai is not None and calls < max_calls and now - state.get("aiFail", 0) > 2 * HOUR:
             facts = {"코인": f"{it['name']}({it['code'][4:]})", "후보 점수(0~100, 화면의 큰 숫자 · 급락 위험을 뺀 점수)": round(it["cand"]),
                      "펌핑 점수(0~100, 급락 위험 빼기 전)": round(it["score"]),
+                     "두 점수 차이": _gap_text(it),
                      "3일 안 최고 예상(중앙값)": _sp(it["mfe"][1]),
                      "3일 뒤 예상": f"{_sp(it['r72'][1])} (10번 중 8번은 {_sp(it['r72'][0], 0)} ~ {_sp(it['r72'][2], 0)})",
                      "72시간 안 +15% 펌핑 확률": f"{it['pPump'] * 100:.0f}%", "72시간 안 −15% 급락 확률": f"{it['pDump'] * 100:.0f}%",

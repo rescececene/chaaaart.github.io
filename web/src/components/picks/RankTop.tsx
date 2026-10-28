@@ -16,7 +16,7 @@ import { minusFix } from './fmt';
 
 const Row = memo(function Row({ it, label, poor }: { it: RankTopItem; label: string; poor?: boolean }) {
   const { move } = useMove(it.sym, it.base, it.price);
-  const why = it.ai || (it.why ? minusFix(it.why) : null);
+  const why = it.ai || it.why ? minusFix(it.ai || it.why || '') : null;
   const top = it.pct != null ? Math.max(1, Math.round(100 - it.pct)) : null;
   return (
     <li>
@@ -35,7 +35,7 @@ const Row = memo(function Row({ it, label, poor }: { it: RankTopItem; label: str
           <span className="block text-[11px] leading-4 whitespace-nowrap text-muted-foreground">{label}</span>
         </span>
         <span className="col-start-3 min-w-0">
-          {why ? <span className="line-clamp-3 text-[13px] leading-[18px] break-keep text-secondary-foreground">{why}</span> : null}
+          {why ? <span className="line-clamp-4 text-[13px] leading-[18px] break-keep text-secondary-foreground">{why}</span> : null}
         </span>
         {it.lo != null && it.hi != null ? (
           <span className="col-span-2 col-start-3 mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px] leading-4">
