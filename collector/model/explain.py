@@ -7,6 +7,13 @@ LABELS = {k: v[0] for d in (FEATURES, REGIME, EXTRA, EXTRA_REGIME) for k, v in d
 COIN = ("upbit", "binance")
 
 
+def _x(v):
+    """배율 → '4.1배' · 1배 아래는 '30% 수준' ('0.0배'처럼 보이지 않게)"""
+    if v >= 0.95:
+        return f"{v:.1f}배"
+    return f"{max(1, round(v * 100))}% 수준" if v >= 0.005 else "1%도 안 되는 수준"
+
+
 def _unit(market):
     return "일" if market in COIN else "거래일"
 
@@ -114,13 +121,13 @@ def sentence(key, v, pct, market, hist=None, mkt=None):
     if key in ("vol_20", "vol_60"):
         return _with_pos(f"{key[4:]}일 변동성 하루 {_u(v, 2)}", pct)
     if key == "vol_ratio":
-        return f"최근 20일 변동성이 60일의 {v:.1f}배"
+        return f"최근 20일 변동성이 60일의 {_x(v)}"
     if key == "volu_1_20":
-        return _with_pos(f"마지막 날 거래량이 20일 평균의 {v:.1f}배", pct)
+        return _with_pos(f"마지막 날 거래량이 20일 평균의 {_x(v)}", pct)
     if key == "volu_5_20":
-        return _with_pos(f"최근 5일 거래량이 20일 평균의 {v:.1f}배", pct)
+        return _with_pos(f"최근 5일 거래량이 20일 평균의 {_x(v)}", pct)
     if key == "volu_20_60":
-        return _with_pos(f"20일 거래량이 60일 평균의 {v:.1f}배", pct)
+        return _with_pos(f"20일 거래량이 60일 평균의 {_x(v)}", pct)
     if key == "hi_52w":
         return _with_pos(f"{span} 고점 대비 {_p(v)}" if v < -0.0005 else f"{span} 고점 부근", pct)
     if key == "lo_52w":
@@ -159,7 +166,7 @@ def sentence(key, v, pct, market, hist=None, mkt=None):
     if key == "dv_20":
         return _with_pos(f"20일 평균 거래대금 {_won(math.exp(v), market)}", pct)
     if key == "dv_trend":
-        return _with_pos(f"최근 5일 거래대금이 60일 평균의 {v:.1f}배", pct)
+        return _with_pos(f"최근 5일 거래대금이 60일 평균의 {_x(v)}", pct)
     if key == "amihud_20":
         return _with_pos("적은 거래에도 가격이 크게 움직이는 편(비유동성)" if (pct or 0) >= 0.5
                          else "거래가 많아 가격 충격이 작은 편(유동성 좋음)", pct)
@@ -216,7 +223,7 @@ def easy_one(key, v, pct, market):
             return None
         span = {"volu_1_20": "어제" if coin else "전 거래일", "volu_5_20": f"최근 5{u}", "volu_20_60": f"최근 20{u}"}[key]
         ref = f"60{u} 평균" if key == "volu_20_60" else f"20{u} 평균"
-        return f"{span} 거래량이 {ref}의 {v:.1f}배로 {'늘었어요' if v > 1 else '줄었어요'}"
+        return f"{span} 거래량이 {ref}의 {_x(v)}{'로' if v >= 0.95 else '으로'} {'늘었어요' if v > 1 else '줄었어요'}"
     if key.startswith("gap_ma"):
         n = key[6:]
         if abs(v) < 0.005:
@@ -281,7 +288,7 @@ def easy_one(key, v, pct, market):
     if key == "dv_20":
         return f"하루 거래대금이 {_won(math.exp(v), market)}으로 다른 {who}보다 {'많아요' if side == 'hi' else '적어요'} ({pos})" if side else None
     if key == "dv_trend":
-        return f"최근 5{u} 거래대금이 60{u} 평균의 {v:.1f}배예요" if not 0.8 <= v <= 1.25 else None
+        return f"최근 5{u} 거래대금이 60{u} 평균의 {_x(v)}{'예요' if v >= 0.95 else '이에요'}" if not 0.8 <= v <= 1.25 else None
     if key in ("frgn_d5", "frgn_d20"):
         return f"외국인 보유율이 {key[6:]}거래일 새 {v:+.1f}%p 바뀌었어요" if abs(v) >= 0.05 else None
     if key == "skew_60":

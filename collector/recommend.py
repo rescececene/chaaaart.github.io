@@ -24,6 +24,7 @@ import math
 import re
 import sys
 import time
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -59,7 +60,8 @@ PEGGED_NAMES = {"PAXG": "금", "XAUT": "금", "KAU": "금", "XAUM": "금", "WBTC
                 "BNSOL": "솔라나", "JITOSOL": "솔라나", "MSOL": "솔라나", "WBNB": "BNB"}
 CAUTION_KO = {"heat": "과열 주의", "down": "하락 경고", "jump": "기준가 뒤 급등", "drop": "기준가 뒤 급락", "thin": "거래가 적어요",
               "listing": "막 상장", "badnews": "악재 뉴스", "hacknews": "해킹 관련 기사"}
-AI_RETRY_H = 2.0      # AI 문장이 실패하면 이 시간 뒤 한 번만 다시 (기준일마다 최대 2번)
+AI_RETRY_H = 2.0      # AI 문장이 실패·일부만 남으면 이 시간 뒤 다시
+AI_MAX_TRIES = 4      # 기준일마다 AI 를 부르는 최대 횟수 (엔진이 다시 돌아 다섯이 바뀌면 바로 다시 — 예: 결과 형식 바뀜)
 
 
 def is_stock_token(market, code, name, us_bases=None):
@@ -404,46 +406,60 @@ def _ai_user(m, rk, picks_by_sym):
 
 
 def ai_reasons(m, rk, picks_by_sym, prev, no_ai=False, log=print):
-    """{sym: 문장} + 상태 — 같은 기준일이면 지난번 것을 그대로 (하루 1번 상위 5개만)"""
+    """{sym: 문장} + 상태 — 같은 기준일·같은 다섯이면 지난번 것을 그대로 (보통 하루 1번 상위 5개만).
+    다섯이 바뀌면(엔진 재실행 등) 바로, 일부가 걸러졌으면 AI_RETRY_H 뒤 다섯을 한 번에 다시 쓴다 — 기준일마다 최대 AI_MAX_TRIES 번"""
     asof = rk.get("asOf")
     st = dict(prev or {}) if (prev or {}).get("asOf") == asof else {"asOf": asof, "texts": {}, "tries": 0}
-    need = [it for it in rk["items"][:N_PICK] if it["sym"] not in st.get("texts", {})]
-    fresh = not st.get("texts")
+    cur = [it["sym"] for it in rk["items"][:N_PICK]]
+    need = [x for x in cur if x not in st.get("texts", {})]
     try:
         last_try = datetime.fromisoformat(st["at"]).timestamp() if st.get("at") else 0
     except ValueError:
         last_try = 0
-    can = fresh and (st.get("tries", 0) == 0 or (st.get("tries", 0) < 2 and time.time() - last_try > AI_RETRY_H * 3600))
+    tries = st.get("tries", 0)
+    changed = set(cur) != set(st.get("for") or [])  # 지난번에 문장을 쓴 다섯과 다르다
+    can = tries < AI_MAX_TRIES and (tries == 0 or changed or time.time() - last_try > AI_RETRY_H * 3600)
     if no_ai or not need or not can or not rk["items"]:
         return st
     try:
         import ai  # collector/ai.py (클로드 연결 담당)
     except ImportError:
         return st
-    st["tries"] = st.get("tries", 0) + 1
+    st["tries"] = tries + 1
     st["at"] = now_iso()
+    st["for"] = cur
     out = ai.write(who="rank", system=AI_SYSTEM, user=_ai_user(m, rk, picks_by_sym), max_tokens=700, schema=AI_SCHEMA)
-    texts = {}
+    texts, drop = {}, Counter()
     for x in (out or {}).get("items") or []:
         s = re.sub(r"\s+", " ", str(x.get("why") or "")).strip().strip('"').strip()
-        if 8 <= len(s) <= 90 and not BANNED.search(s):
-            texts[str(x.get("sym"))] = s
+        sym = str(x.get("sym"))
+        if sym not in cur:
+            drop["sym"] += 1
+        elif not 8 <= len(s) <= 90:
+            drop["len"] += 1
+        elif BANNED.search(s):
+            drop["ban"] += 1
+        else:
+            texts[sym] = s
+    old = st.get("texts") or {}
     seen_head = set()
     keep = {}
-    for it in rk["items"][:N_PICK]:
-        t = texts.get(it["sym"])
+    for sym in cur:  # 새 문장 우선, 이번에 걸러진 코인은 지난 문장(같은 기준일)이 있으면 그대로
+        t = texts.get(sym) or old.get(sym)
         if not t:
             continue
         head = re.sub(r"\s+", "", t)[:6]
         if head in seen_head:
+            drop["head"] += 1
             continue
         seen_head.add(head)
-        keep[it["sym"]] = t
+        keep[sym] = t
     st["texts"] = keep
-    meta = getattr(ai, "last", lambda w: None)("rank") or {}
-    st["by"] = meta.get("provider")
-    st["model"] = meta.get("model")
-    log(f"[순위] AI 문장 {len(st['texts'])}개 ({st.get('by') or '없음'})")
+    if texts:
+        meta = getattr(ai, "last", lambda w: None)("rank") or {}
+        st["by"] = meta.get("provider")
+        st["model"] = meta.get("model")
+    log(f"[순위] AI 문장 {len(keep)}/{len(cur)}개 ({st.get('by') or '없음'})" + (f" · 거름 {dict(drop)}" if drop else ""))
     return st
 
 

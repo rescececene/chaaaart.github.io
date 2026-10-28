@@ -1777,6 +1777,18 @@ def _updn(x, up="위예요", dn="아래예요"):
     return f"{abs(v) * 100:.1f}% {up if v > 0 else dn}"
 
 
+def _ratio(v):
+    """배율 → '4.1배' · 1배 아래는 '35% 수준' ('0.0배'처럼 보이지 않게)"""
+    if v >= 0.95:
+        return f"{v:.1f}배"
+    return f"{max(1, round(v * 100))}% 수준" if v >= 0.005 else "1%도 안 되는 수준"
+
+
+def _ratio_is(v):
+    """'4.1배예요' · '35% 수준이에요'"""
+    return _ratio(v) + ("예요" if v >= 0.95 else "이에요")
+
+
 def reason_text(f, x, X):
     """특징 하나의 값 → 숫자가 들어간 쉬운 문장 (방향은 붙이는 쪽에서)"""
     if x is None:
@@ -1800,15 +1812,15 @@ def reason_text(f, x, X):
     if f == "vpos":
         return f"최근 120일 거래의 {x * 100:.0f}%가 지금 가격보다 아래에서 이뤄졌어요"
     if f == "lval1":
-        return f"최근 24시간 거래대금 {_eok(math.exp(x))}"
+        return f"최근 24시간 거래대금이 {_eok(math.exp(x))}이에요"
     if f == "lval5":
-        return f"최근 5일 하루 평균 거래대금 {_eok(math.exp(x))}(클수록 덜 출렁여요)"
+        return f"최근 5일 하루 평균 거래대금이 {_eok(math.exp(x))}이에요(작을수록 크게 출렁여요)"
     if f == "vr1_20":
-        return f"최근 24시간 거래대금이 20일 평균의 {math.exp(x):.1f}배예요"
+        return f"최근 24시간 거래대금이 20일 평균의 {_ratio_is(math.exp(x))}"
     if f == "vr5_20":
-        return f"최근 5일 거래대금이 20일 평균의 {math.exp(x):.1f}배예요"
+        return f"최근 5일 거래대금이 20일 평균의 {_ratio_is(math.exp(x))}"
     if f == "vr20_60":
-        return f"최근 20일 거래대금이 60일 평균의 {math.exp(x):.1f}배예요"
+        return f"최근 20일 거래대금이 60일 평균의 {_ratio_is(math.exp(x))}"
     if f == "vslope20":
         return f"20일 거래대금 추세가 하루 {_sp(_ex(x))}씩이에요"
     if f == "vrank":
@@ -1816,7 +1828,7 @@ def reason_text(f, x, X):
     if f == "vrank_chg":
         return f"거래대금 순위가 20일 전보다 {x * 100:+.0f}%p {'올라갔어요' if x > 0 else '내려갔어요'}".replace("-", "−")
     if f == "spike_max10":
-        return f"최근 10일 중 하루 거래대금이 20일 평균의 {math.exp(x):.1f}배까지 붙었어요"
+        return f"최근 10일 중 하루 거래대금이 20일 평균의 {_ratio(math.exp(x))}까지 붙었어요"
     if f == "spike_hold":
         return f"거래가 가장 많던 날보다 지금 가격이 {_sp(_ex(x))}예요"
     if f == "obv20":
@@ -1962,7 +1974,8 @@ def make_risks(x, res, info, tick, news, ages, stats, ev_recent):
 
 AI_SYS = ("너는 업비트 코인 데이터를 쉬운 한국어로 설명하는 사람이야. 해요체로 1~2문장, 130자 안으로 써. "
           "주어진 숫자만 쓰고 새 숫자를 지어내지 마. '사세요·파세요·오를 거예요·추천' 같은 권유나 장담은 절대 하지 마. "
-          "왜 점수가 높은지(근거)와 조심할 점(위험)을 함께 말해. 이모지·느낌표 쓰지 마.")
+          "왜 점수가 높은지(근거)와 조심할 점(위험)을 함께 말해. 이모지·느낌표 쓰지 마. "
+          "점수를 말할 때는 화면의 큰 숫자인 '후보 점수'(급락 위험을 뺀 점수)를 쓰고, 펌핑 점수와 차이가 크면 급락 위험 때문이라고 말해.")
 AI_BAN = ("사세요", "매수하", "파세요", "매도하", "오를 거", "오를 것", "추천", "확실", "보장", "!")
 
 
@@ -1982,8 +1995,8 @@ def rule_text(it, stats):
     return " ".join(u.rstrip(".") + "." for u in ups) + f" 다만 {tail}."
 
 
-def ai_texts(items, state, stats, now, max_calls=3):
-    """상위 10개 — 점수 10점 칸·앞쪽 근거 2개·위험 단계가 바뀌었거나 48시간이 지났을 때만 새로 쓴다
+def ai_texts(items, state, stats, now, max_calls=5):
+    """상위 10개(화면 순서대로) — 후보 점수 10점 칸·앞쪽 근거 2개·위험 단계가 바뀌었거나 48시간이 지났을 때만 새로 쓴다
     (ai.write: 클로드 하이쿠 → 안 되면 무료 Gemma → 둘 다 안 되면 None 이라 규칙 문장). 한 실행 최대 max_calls 번."""
     try:
         import ai  # 클로드 연결 담당의 collector/ai.py
@@ -1991,9 +2004,9 @@ def ai_texts(items, state, stats, now, max_calls=3):
         ai = None
     cache = state.setdefault("ai", {})
     calls = 0
-    top = ((stats or {}).get("buckets") or [{}])[0]
+    top = ((stats or {}).get("bucketsCand") or [{}])[0]
     for it in items:
-        key = "|".join([str(int(it["score"] // 10)), ",".join(r["k"] for r in it["reasons"][:2]),
+        key = "|".join([str(int(it["cand"] // 10)), ",".join(r["k"] for r in it["reasons"][:2]),
                         str(max([r["lv"] for r in it["risks"]] or [0]))])
         c = cache.get(it["code"])
         if c and c.get("key") == key and now - c.get("at", 0) < 48 * HOUR and c.get("by") != "rule":
@@ -2001,12 +2014,13 @@ def ai_texts(items, state, stats, now, max_calls=3):
             continue
         text, by = None, "rule"
         if ai is not None and calls < max_calls and now - state.get("aiFail", 0) > 2 * HOUR:
-            facts = {"코인": f"{it['name']}({it['code'][4:]})", "펌핑 가능성 점수(0~100)": round(it["score"]),
+            facts = {"코인": f"{it['name']}({it['code'][4:]})", "후보 점수(0~100, 화면의 큰 숫자 · 급락 위험을 뺀 점수)": round(it["cand"]),
+                     "펌핑 점수(0~100, 급락 위험 빼기 전)": round(it["score"]),
                      "3일 안 최고 예상(중앙값)": _sp(it["mfe"][1]),
                      "3일 뒤 예상": f"{_sp(it['r72'][1])} (10번 중 8번은 {_sp(it['r72'][0], 0)} ~ {_sp(it['r72'][2], 0)})",
                      "72시간 안 +15% 펌핑 확률": f"{it['pPump'] * 100:.0f}%", "72시간 안 −15% 급락 확률": f"{it['pDump'] * 100:.0f}%",
                      "근거": [r["t"] for r in it["reasons"]], "위험": [r["t"] for r in it["risks"]],
-                     "과거 점수 90 이상": (f"펌핑 {top['pump'] * 100:.0f}% · 급락 {top['dump'] * 100:.0f}% · "
+                     "과거 후보 점수 90 이상": (f"펌핑 {top['pump'] * 100:.0f}% · 급락 {top['dump'] * 100:.0f}% · "
                                      f"3일 뒤 중앙값 {_sp(top['medR72'])}") if top.get("pump") is not None else None}
             try:
                 calls += 1
@@ -2235,7 +2249,9 @@ def run(args):
             "histP": ",".join("" if v is None else str(v) for v in gridp), "vp": vp_display(bars, x["_close"]) if bars else None,
             "stale": (A - (d["upto"] or A)) >= 3 * HOUR,
             "anchor": x["_anchor"]})
-    targets = [it for it in items if it["rank"] <= 10 or it["rankNet"] <= 10]
+    # 화면 기본 순서(급락 위험 뺀 순 = rankNet)의 위쪽부터 문장을 쓴다 — 펌핑 점수 순 위쪽은 그다음
+    targets = sorted((it for it in items if it["rank"] <= 10 or it["rankNet"] <= 10),
+                     key=lambda it: (it["rankNet"] > 10, it["rankNet"], it["rank"]))
     calls = ai_texts(targets, state, stats, now) if not args.no_ai else 0
     if args.no_ai:
         for it in targets:
