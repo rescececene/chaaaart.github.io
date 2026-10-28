@@ -559,22 +559,24 @@ def rec_item(m, p, r, row, extra=None):
                                 f"(검증 등급 반영, 초과수익 중앙값 {e.get('q50', 0) * 100:+.2f}%p{rng})", "tone": "up"})
     seen = set()
 
-    def add(text, tone):  # 같은 숫자를 다른 말로 되풀이하는 근거는 하나만 ('최근 5거래일 -5.3% 빠진 뒤예요' · '최근 5거래일 -5.3% — 시장보다…')
-        k = _sig(text)
-        if k in seen:
+    def add(text, tone, key=None):
+        """같은 특징(쉬운 말 '1년 흐름 +252%' · 기술 문장 '250~20거래일 전 수익률 +251.5%')이나
+        같은 숫자('최근 5거래일 -5.3% 빠진 뒤예요' · '최근 5거래일 -5.3% — 시장보다…')를 되풀이하는 근거는 하나만"""
+        ks = {_sig(text)} | ({"k:" + key} if key else set())
+        if ks & seen:
             return False
-        seen.add(k)
+        seen.update(ks)
         reasons.append({"text": text, "tone": tone})
         return True
 
     for x in p.get("why") or []:
         if len(reasons) < 3:
-            add(x["text"], "up")
+            add(x["text"], "up", x.get("key"))
     for x in p.get("reasons") or []:
         if x.get("tone") == "up" and len(reasons) < 4:
-            add(x["text"], "up")
+            add(x["text"], "up", x.get("key"))
     for x in p.get("reasons") or []:
-        if x.get("tone") == "down" and len(reasons) < 5 and add(x["text"], "down"):
+        if x.get("tone") == "down" and len(reasons) < 5 and add(x["text"], "down", x.get("key")):
             break
     risks = []
     if atr and stop_pct is not None:

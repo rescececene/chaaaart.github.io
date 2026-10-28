@@ -358,7 +358,7 @@ def build(items, market, n_reasons=4, n_contrib=8, hist=None, mkt=None):
         s = sentence(k, v, pct, market, hist, mkt)
         if not s:
             continue
-        reasons.append({"text": s, "tone": tone(z, top_abs)})
+        reasons.append({"text": s, "tone": tone(z, top_abs), "key": k})
         if len(reasons) >= n_reasons:
             break
     return reasons, contrib
