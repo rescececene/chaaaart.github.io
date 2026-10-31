@@ -52,7 +52,7 @@ interface UpbitMsg {
   ty?: string; type?: string; cd?: string; code?: string; error?: unknown;
   tp?: number; trade_price?: number; scr?: number; signed_change_rate?: number; atp24h?: number; acc_trade_price_24h?: number;
   op?: number; opening_price?: number; hp?: number; high_price?: number; lp?: number; low_price?: number;
-  pcp?: number; prev_closing_price?: number; atv?: number; acc_trade_volume?: number;
+  pcp?: number; prev_closing_price?: number; atv?: number; acc_trade_volume?: number; atp?: number; acc_trade_price?: number;
   obu?: { ap: number; bp: number; as: number; bs: number }[];
   orderbook_units?: { ask_price: number; bid_price: number; ask_size: number; bid_size: number }[];
   tas?: number; total_ask_size?: number; tbs?: number; total_bid_size?: number;
@@ -123,7 +123,7 @@ const UpbitLive = {
     putQuote(sym, {
       price: d.tp ?? d.trade_price ?? null, chg: ((d.scr ?? d.signed_change_rate) ?? 0) * 100, vol: d.atp24h ?? d.acc_trade_price_24h,
       open: d.op ?? d.opening_price, high: d.hp ?? d.high_price, low: d.lp ?? d.low_price,
-      prevClose: d.pcp ?? d.prev_closing_price, accVol: d.atv ?? d.acc_trade_volume, ts: Date.now(), live: true,
+      prevClose: d.pcp ?? d.prev_closing_price, accVol: d.atv ?? d.acc_trade_volume, accVal: d.atp ?? d.acc_trade_price, ts: Date.now(), live: true,
     });
   },
 };

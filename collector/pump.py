@@ -39,7 +39,8 @@
 
 출력
   web/public/data/pump.json        사이트용 — 상위 30개(근거·위험·영역 점수·점수 이력·매물대 요약) + 전 종목 요약
-  web/public/data/pump_log.json    실제 신호 기록 — 후보 점수가 SIG_THR 이상으로 올라선 순간(같은 코인 72시간에 한 번) → 72시간 뒤 채점
+  web/public/data/pump_log.json    실제 신호 기록 — 후보 점수가 SIG_THR 이상으로 올라선 순간(같은 코인 72시간에 한 번) → +15%·−15% 는 닿는 즉시(prog.hit),
+                                   최종은 72시간 뒤(res). 화면은 prog 에 웹소켓 실시간 가격을 더해 바로 채점한다
   web/public/data/pump_stats.json  과거 검증(워크포워드) — --train 이 만든다
   web/public/data/pump_model.json  학습된 계수·나무·대응표 (사이트는 읽지 않음)
   web/public/data/pump_state.json  점수 이력·신호·AI 문장 캐시 (사이트는 읽지 않음)
@@ -2064,13 +2065,15 @@ def ai_texts(items, state, stats, now, max_calls=5):
 
 
 def grade_log(lg, store, now):
-    """72시간이 지난 신호를 시간봉으로 채점"""
+    """신호 채점 — +15%·−15% 는 닿는 순간 확정(prog.hit), 72시간이 지나면 최종(res).
+    아직 72시간 전인 신호에는 지금까지 받은 시간봉의 최고·최저(prog)를 적어 둔다 — 화면은 여기에 실시간 가격을 더한다."""
     coins = store.get("coins") or {}
     for it in lg["items"]:
         if it.get("status") != "wait":
             continue
         t = it["t"]
         if now < t + 72 * HOUR + 600:
+            progress(it, coins.get(it["code"]) or {})
             continue
         b = [r for r in (coins.get(it["code"]) or {}).get("b") or [] if t <= r[0] < t + 72 * HOUR]
         st = coins.get(it["code"]) or {}
@@ -2087,19 +2090,47 @@ def grade_log(lg, store, now):
         kind = "both" if (mfe >= PUMP and mae <= DUMP) else "pump" if mfe >= PUMP else "dump" if mae <= DUMP else "none"
         it["res"] = {"mfe": rnd(mfe, 4), "mae": rnd(mae, 4), "r72": rnd(r72, 4), "r24": rnd(r24, 4), "kind": kind}
         it["status"] = "done"
+        progress(it, st)  # 닿은 시각(prog.hit.at)을 남겨 둔다 — 화면의 '몇 시간 만에 닿음'
+
+
+def progress(it, st):
+    """72시간 안 신호의 진행 — 받은 시간봉까지 최고·최저, 처음 +15%·−15% 에 닿은 시각"""
+    t, p0 = it["t"], it["price"]
+    b = [r for r in st.get("b") or [] if t <= r[0] < t + 72 * HOUR]
+    if not b or not p0:
+        return
+    hit = (it.get("prog") or {}).get("hit")
+    up = dn = None
+    for r in b:
+        if up is None and r[2] / p0 - 1 >= PUMP:
+            up = r[0]
+        if dn is None and r[3] / p0 - 1 <= DUMP:
+            dn = r[0]
+    if up is not None or dn is not None:
+        kind = "both" if up is not None and dn is not None else "pump" if up is not None else "dump"
+        hit = {"kind": kind, "at": int(min(x for x in (up, dn) if x is not None) + HOUR)}  # 그 시간봉이 끝난 시각(늦어도 이때까지 닿음)
+    prog = {"mfe": rnd(max(r[2] for r in b) / p0 - 1, 4), "mae": rnd(min(r[3] for r in b) / p0 - 1, 4),
+            "upto": int(b[-1][0] + HOUR)}
+    if hit:
+        prog["hit"] = hit
+    it["prog"] = prog
 
 
 def log_summary(lg):
     done = [x for x in lg["items"] if x.get("status") == "done"]
+    opn = [x for x in lg["items"] if x.get("status") == "wait"]
+    live = {"open": len(opn),
+            "openPump": sum(((x.get("prog") or {}).get("hit") or {}).get("kind") in ("pump", "both") for x in opn),
+            "openDump": sum(((x.get("prog") or {}).get("hit") or {}).get("kind") in ("dump", "both") for x in opn)}
     if not done:
-        return {"n": len(lg["items"]), "graded": 0}
+        return {"n": len(lg["items"]), "graded": 0, **live}
     k = [x["res"]["kind"] for x in done]
     r72 = sorted(x["res"]["r72"] for x in done)
     mfe = sorted(x["res"]["mfe"] for x in done)
     pred = sorted(x["mfe"][1] for x in done)
     return {"n": len(lg["items"]), "graded": len(done), "pump": sum(z in ("pump", "both") for z in k) / len(done),
             "dump": sum(z in ("dump", "both") for z in k) / len(done), "medR72": _median(r72) - FEE,
-            "medMfe": _median(mfe), "predMfe": _median(pred)}
+            "medMfe": _median(mfe), "predMfe": _median(pred), **live}
 
 
 def placeholder(reason):

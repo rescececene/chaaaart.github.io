@@ -17,6 +17,7 @@ export interface Quote {
   low?: number | null;
   prevClose?: number | null; // 등락 기준가 (전일 종가 · 바이낸스는 24시간 전)
   accVol?: number | null; // 누적 거래량
+  accVal?: number | null; // 오늘 누적 거래대금 (업비트: 09:00 KST 에 0으로) — 실시간 급등 감지가 몇 분 사이 거래대금을 잴 때 쓴다
   status?: string; // 네이버 장 상태 OPEN/CLOSE
   ts: number;
   live: boolean; // false 면 GitHub Actions 가 10분마다 만든 지연 시세

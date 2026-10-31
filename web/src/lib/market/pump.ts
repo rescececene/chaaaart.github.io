@@ -102,10 +102,14 @@ export interface PumpLogItem {
   mfe: [number, number, number]; r72: [number, number, number]; pPump: number; pDump: number;
   status: 'wait' | 'done' | 'na';
   res?: { mfe: number; mae: number; r72: number; r24: number | null; kind: 'pump' | 'dump' | 'both' | 'none' };
+  /** 채점 전 진행 — 수집기가 마지막으로 본 시간봉까지의 최고·최저(분수)와 그 시각(초), +15%·−15% 에 처음 닿은 시각 */
+  prog?: { mfe: number; mae: number; upto: number; hit?: { kind: 'pump' | 'dump' | 'both'; at: number } };
 }
 export interface PumpLog {
   version: number; updatedAt: string; thr: number; items: PumpLogItem[];
-  summary: { n: number; graded: number; pump?: number; dump?: number; medR72?: number; medMfe?: number; predMfe?: number };
+  summary: { n: number; graded: number; pump?: number; dump?: number; medR72?: number; medMfe?: number; predMfe?: number;
+    /** 72시간이 아직 안 끝난 신호 수와 그중 이미 +15% · −15% 에 닿은 수 */
+    open?: number; openPump?: number; openDump?: number };
   backtest: PumpSignalRule | null;
 }
 
@@ -123,3 +127,40 @@ export function parseHist(h: string | (number | null)[] | null | undefined): (nu
 }
 /** 'KRW-BTC' → 'BTC' */
 export const tickerOfCode = (code: string) => code.replace(/^KRW-/, '');
+
+// ── 실시간 (화면에서 업비트 웹소켓 가격으로) ─────────────────────────
+/** 후보가 기준 시각(점수를 낸 시간봉) 뒤 이미 크게 움직였는지 — 'ran' 이미 +15% 넘게 올랐어요 · 'fell' −10% 넘게 빠졌어요 */
+export const RAN = 0.15, FELL = -0.1;
+export type PumpLiveState = 'ok' | 'ran' | 'fell';
+export function pumpMove(base: number | null | undefined, price: number | null | undefined): number | null {
+  return base && price && base > 0 ? price / base - 1 : null;
+}
+export function pumpLiveState(move: number | null): PumpLiveState {
+  return move == null ? 'ok' : move >= RAN ? 'ran' : move <= FELL ? 'fell' : 'ok';
+}
+/** 실시간 순서 — 아직 안 움직인 후보는 원래 순서(key), 이미 움직인 후보는 뒤로 (올라 버린 것 → 빠진 것) */
+export function liveOrder<T>(items: T[], key: (x: T) => number, move: (x: T) => number | null): { x: T; move: number | null; st: PumpLiveState }[] {
+  const w: Record<PumpLiveState, number> = { ok: 0, ran: 1, fell: 2 };
+  return items.map((x) => { const m = move(x); return { x, move: m, st: pumpLiveState(m) }; })
+    .sort((a, b) => w[a.st] - w[b.st] || key(a.x) - key(b.x));
+}
+
+/** 신호 기록 실시간 채점 — 서버가 마지막으로 본 진행(prog)과 지금 가격을 합친다.
+ *  +15% · −15% 는 닿는 순간 확정(72시간을 기다리지 않음), '그 외'만 72시간이 끝나야 정해진다. */
+export interface PumpLiveGrade {
+  mfe: number | null; mae: number | null; now: number | null; left: number;
+  kind: 'pump' | 'dump' | 'both' | null; at: number | null; live: boolean;
+}
+export function liveGrade(x: PumpLogItem, price: number | null | undefined, nowSec = Date.now() / 1000): PumpLiveGrade {
+  const left = Math.max(0, x.t + 72 * 3600 - nowSec);
+  const p = x.prog;
+  const cur = left > 0 ? pumpMove(x.price, price) : null; // 72시간이 지난 뒤의 가격은 채점에 넣지 않는다
+  let mfe = p?.mfe ?? null, mae = p?.mae ?? null;
+  if (cur != null) { mfe = mfe == null ? cur : Math.max(mfe, cur); mae = mae == null ? cur : Math.min(mae, cur); }
+  const up = mfe != null && mfe >= PUMP_HIT, dn = mae != null && mae <= -PUMP_HIT;
+  const kind = up && dn ? 'both' : up ? 'pump' : dn ? 'dump' : null;
+  // 닿은 시각은 서버가 시간봉으로 확인한 것만 (화면에서 방금 닿은 것은 live)
+  const at = p?.hit?.at ?? null;
+  return { mfe, mae, now: cur, left, kind, at, live: !p?.hit && kind != null };
+}
+const PUMP_HIT = 0.15;

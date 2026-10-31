@@ -2,6 +2,7 @@
 // 맨 위: 과거 검증(워크포워드)을 쉬운 말로 먼저 — 효과가 약하거나 급락도 함께 늘면 숨기지 않는다.
 // 목록: 점수 순 30개. 줄을 누르면 예상 %·근거·위험·영역 점수·점수 이력·매물대를 펼친다(펼칠 때만 그린다).
 // 그 아래: 실제 신호 기록(백테스트와 구분) → 예측 성적(자세히) → 전 종목 점수 → 점수 없는 신규 상장 코인.
+// 실시간(업비트 웹소켓): 맨 위 '지금 움직이는 코인' · 기준 뒤 이미 움직인 후보는 목록 아래로 · 신호 기록은 +15%·−15% 에 닿는 순간 채점.
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, ChevronDown, ChevronRight, ExternalLink, Info, Rocket } from 'lucide-react';
@@ -12,15 +13,17 @@ import { SymbolLogo } from '@/components/common/SymbolLogo';
 import { ChangeText } from '@/components/common/Change';
 import { Segmented } from '@/components/common/Segmented';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useQuote, useWant } from '@/hooks/market';
+import { useQuote, useQuotesTick, useWant } from '@/hooks/market';
 import { fmtPrice, timeAgo } from '@/lib/format';
-import { remember } from '@/lib/market';
+import { getQuote, remember } from '@/lib/market';
 import {
-  parseHist, pumpData, pumpLog, pumpStats, tickerOfCode, upbitUrl,
-  type PumpBucket, type PumpData, type PumpItem, type PumpLog, type PumpLogItem, type PumpOrderStat, type PumpRow, type PumpStats,
+  liveGrade, liveOrder, parseHist, pumpData, pumpLog, pumpMove, pumpStats, tickerOfCode, upbitUrl,
+  type PumpBucket, type PumpData, type PumpItem, type PumpLiveState, type PumpLog, type PumpLogItem, type PumpOrderStat, type PumpRow, type PumpStats,
 } from '@/lib/market/pump';
 import { href } from '@/lib/router';
 import { DIR, eok, p0, PartBars, RiskChips, ScoreLine, sp, SpanBar, stampT, VpChart } from '@/components/pump/parts';
+import { LiveSurge } from '@/components/pump/LiveSurge';
+import { surgeFor } from '@/lib/market/surge';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const stampIso = (iso: string | null | undefined) => {
@@ -227,22 +230,29 @@ function Detail({ it, thr, mode }: { it: PumpItem; thr: number; mode: 'net' | 's
   );
 }
 
-const Candidate = memo(function Candidate({ it, rank, mode, open, onToggle, thr }: {
-  it: PumpItem; rank: number; mode: 'net' | 'score'; open: boolean; onToggle: (code: string) => void; thr: number;
+const Candidate = memo(function Candidate({ it, rank, mode, open, onToggle, thr, st }: {
+  it: PumpItem; rank: number; mode: 'net' | 'score'; open: boolean; onToggle: (code: string) => void; thr: number; st: PumpLiveState;
 }) {
   const q = useQuote(it.sym);
   const price = q?.price ?? it.price;
+  const mv = q?.live ? pumpMove(it.price, q.price) : null;
+  const hot = surgeFor(it.sym)?.hit;
   const big = mode === 'net' ? it.cand : it.score;
   const d24 = mode === 'net' ? it.d24 : it.d24p;
   return (
     <li id={`pump-${it.code}`} className={cn('scroll-mt-20 border-b border-border last:border-b-0', open && 'bg-transparent')}>
       <button type="button" aria-expanded={open} onClick={() => onToggle(it.code)}
         className="press -mx-2 grid w-[calc(100%+16px)] grid-cols-[18px_36px_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-xl px-2 py-3 text-left transition-colors hover:bg-hover sm:grid-cols-[22px_40px_minmax(0,1fr)_auto]">
-        <span className="text-right text-[13px] font-semibold text-muted-foreground tabular">{rank}</span>
-        <SymbolLogo sym={it.sym} size={36} className="sm:size-10" />
+        <span className="text-right text-[13px] font-semibold text-muted-foreground tabular">{st === 'ok' ? rank : '·'}</span>
+        <SymbolLogo sym={it.sym} size={36} className={cn('sm:size-10', st !== 'ok' && 'opacity-60')} />
         <span className="min-w-0">
           <span className="flex min-w-0 items-center gap-1.5">
             <b className="truncate text-[15.5px] leading-[21px] font-semibold tracking-[-0.01em]">{it.name}</b>
+            {st !== 'ok' ? (
+              <span className={cn('inline-flex h-[20px] shrink-0 items-center rounded-[6px] px-1.5 text-[12px] font-semibold', st === 'ran' ? 'bg-up-soft text-up-text' : 'bg-down-soft text-down-text')}>
+                {st === 'ran' ? '이미 올랐어요' : '빠지는 중'}
+              </span>
+            ) : hot ? <span className="inline-flex h-[20px] shrink-0 items-center rounded-[6px] bg-up-soft px-1.5 text-[12px] font-semibold text-up-text">지금 급등</span> : null}
             <RiskChips risks={it.risks} max={2} className="max-sm:hidden" />
             <RiskChips risks={it.risks} max={1} className="sm:hidden" />
           </span>
@@ -251,7 +261,7 @@ const Candidate = memo(function Candidate({ it, rank, mode, open, onToggle, thr 
           </span>
           <span className="block truncate text-[12.5px] leading-[18px] text-muted-foreground tabular">
             펌핑<span className="max-sm:hidden">(+15%)</span> <b className="font-semibold text-up-text">{p0(it.pPump)}</b> · 급락<span className="max-sm:hidden">(−15%)</span> <b className="font-semibold text-down-text">{p0(it.pDump)}</b>
-            {q?.chg != null ? <> · 24h <ChangeText value={q.chg} className="text-[12.5px]" /></> : null}
+            {mv != null ? <> · 점수 낸 뒤 <ChangeText value={mv * 100} className="text-[12.5px]" /></> : q?.chg != null ? <> · 24h <ChangeText value={q.chg} className="text-[12.5px]" /></> : null}
             <span className="max-sm:hidden"> · {tickerOfCode(it.code)} · {fmtPrice(price, 'upbit')}원{it.val24 != null ? ` · 거래 ${eok(it.val24)}` : ''}</span>
           </span>
         </span>
@@ -280,8 +290,16 @@ const KIND: Record<NonNullable<PumpLogItem['res']>['kind'], { text: string; cls:
   none: { text: '그 외', cls: 'bg-secondary text-muted-foreground' },
 };
 
+const LIVE_KIND: Record<'pump' | 'dump' | 'both', { text: string; cls: string }> = {
+  pump: { text: '펌핑 성공', cls: 'bg-up-soft text-up-text' },
+  dump: { text: '급락', cls: 'bg-down-soft text-down-text' },
+  both: { text: '펌핑·급락 둘 다', cls: 'bg-secondary text-secondary-foreground' },
+};
+const hoursText = (sec: number) => (sec >= 3600 ? `${Math.floor(sec / 3600)}시간` : `${Math.max(1, Math.round(sec / 60))}분`);
+
 function LogRow({ x }: { x: PumpLogItem }) {
-  const left = Math.max(0, Math.ceil((x.t + 72 * 3600 - Date.now() / 1000) / 3600));
+  const q = useQuote(`upbit:${x.code}`);
+  const g = x.status === 'wait' ? liveGrade(x, q?.live ? q.price : null) : null;
   return (
     <li className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 border-b border-border py-2.5 last:border-b-0">
       <div className="min-w-0">
@@ -295,13 +313,22 @@ function LogRow({ x }: { x: PumpLogItem }) {
             <> → 실제 최고 <b className={cn('font-semibold', DIR(x.res.mfe))}>{sp(x.res.mfe)}</b>, 3일 뒤 <b className={cn('font-semibold', DIR(x.res.r72))}>{sp(x.res.r72)}</b>
               <span className="text-muted-foreground"> (최저 {sp(x.res.mae)})</span></>
           ) : x.status === 'na' ? <span className="text-muted-foreground"> → 결과를 확인하지 못했어요</span>
-            : <span className="text-muted-foreground"> → 3일 뒤 채점 ({left}시간 남음)</span>}
+            : g ? (
+              <span className="text-muted-foreground">
+                {' '}→{x.prog ? <> 지금까지 최고 <b className={cn('font-semibold', DIR(g.mfe))}>{sp(g.mfe)}</b> · 최저 <b className={cn('font-semibold', DIR(g.mae))}>{sp(g.mae)}</b></> : null}
+                {g.now != null ? <>{x.prog ? ' ·' : ''} 지금 <b className={cn('font-semibold', DIR(g.now))}>{sp(g.now)}</b></> : null}
+                {g.kind && g.at ? ` · ${hoursText(g.at - x.t)} 만에 닿음` : g.kind ? ' · 방금 닿음' : ''}
+                {g.left > 0 ? ` · ${hoursText(g.left)} 남음` : ' · 최종 채점 중'}
+              </span>
+            ) : null}
         </p>
       </div>
       {x.status === 'done' && x.res ? (
         <span className={cn('mt-0.5 inline-flex h-[22px] items-center rounded-md px-1.5 text-[12px] font-bold whitespace-nowrap', KIND[x.res.kind].cls)}>{KIND[x.res.kind].text}</span>
+      ) : g?.kind ? (
+        <span className={cn('mt-0.5 inline-flex h-[22px] items-center rounded-md px-1.5 text-[12px] font-bold whitespace-nowrap', LIVE_KIND[g.kind].cls)}>{LIVE_KIND[g.kind].text}</span>
       ) : (
-        <span className="mt-0.5 inline-flex h-[22px] items-center rounded-md bg-secondary px-1.5 text-[12px] font-semibold whitespace-nowrap text-muted-foreground">{x.status === 'na' ? '확인 불가' : '채점 대기'}</span>
+        <span className="mt-0.5 inline-flex h-[22px] items-center rounded-md bg-secondary px-1.5 text-[12px] font-semibold whitespace-nowrap text-muted-foreground">{x.status === 'na' ? '확인 불가' : '진행 중'}</span>
       )}
     </li>
   );
@@ -315,7 +342,7 @@ function SignalLog({ log }: { log: PumpLog | undefined }) {
   const shown = more ? items.slice(0, 120) : items.slice(0, 12);
   return (
     <Card>
-      <CardTitle sub={`후보 점수가 ${log.thr} 이상으로 올라선 순간의 가격을 적어 두고 72시간 뒤에 채점해요 (같은 코인은 72시간에 한 번)`}>실제 신호 기록</CardTitle>
+      <CardTitle sub={`후보 점수가 ${log.thr} 이상으로 올라선 순간의 가격을 적어 두고, +15%·−15% 에 닿으면 그 순간 실시간으로 채점해요. 둘 다 안 닿으면 72시간 뒤에 '그 외'로 끝나요 (같은 코인은 72시간에 한 번)`}>실제 신호 기록</CardTitle>
       <div className="mb-2 rounded-[14px] bg-tile px-3.5 py-3 text-[13px] leading-[1.6] break-keep text-secondary-foreground">
         {s.graded > 0 ? (
           <p>
@@ -323,7 +350,13 @@ function SignalLog({ log }: { log: PumpLog | undefined }) {
             · 3일 뒤 중앙값 <b className={cn('font-semibold', DIR(s.medR72))}>{sp(s.medR72)}</b>
             {s.medMfe != null ? <> · 실제 최고 중앙값 {sp(s.medMfe)}(예상 {sp(s.predMfe)})</> : null}
           </p>
-        ) : <p>아직 채점이 끝난 신호가 없어요 (신호 뒤 72시간이 지나야 채점해요). 지금까지 {s.n}번 기록했어요.</p>}
+        ) : <p>아직 72시간이 다 지난 신호가 없어요. 지금까지 {s.n}번 기록했어요.</p>}
+        {s.open ? (
+          <p className="mt-0.5">
+            진행 중 <b className="font-semibold">{s.open}번</b> 중 이미 +15% 닿음 <b className="font-semibold text-up-text">{s.openPump ?? 0}번</b> · −15% 닿음 <b className="font-semibold text-down-text">{s.openDump ?? 0}번</b>
+            <span className="text-muted-foreground"> (수집기가 마지막으로 본 시간봉 기준 · 아래 줄은 실시간)</span>
+          </p>
+        ) : null}
         {bt ? (
           <p className="mt-0.5 text-muted-foreground">
             같은 규칙을 과거에 적용했을 때(백테스트 {bt.n.toLocaleString('ko-KR')}번): 펌핑 {p0(bt.pump)} · 급락 {p0(bt.dump)} · 3일 뒤 중앙값 {sp(bt.medR72)}
@@ -623,7 +656,8 @@ export default function PumpPage({ args }: PageProps) {
   const { data: stats } = useQuery({ queryKey: ['pump-stats'], queryFn: pumpStats, staleTime: 30 * 60e3, retry: 1 });
   const { data: log } = useQuery({ queryKey: ['pump-log'], queryFn: pumpLog, staleTime: 5 * 60e3, refetchInterval: 10 * 60e3, retry: 1 });
   const items = useMemo(() => data?.items ?? [], [data]);
-  const syms = useMemo(() => items.map((it) => it.sym), [items]);
+  const syms = useMemo(() => [...items.map((it) => it.sym),
+    ...(log?.items ?? []).filter((x) => x.status === 'wait').map((x) => `upbit:${x.code}`)], [items, log]);
   useWant(syms.length ? syms : null);
   useEffect(() => { items.forEach((it) => remember(it.sym, { name: it.name, sub: tickerOfCode(it.code) })); }, [items]);
   useEffect(() => { document.title = '펌핑 후보 — 마켓'; return () => { document.title = '마켓'; }; }, []);
@@ -640,10 +674,15 @@ export default function PumpPage({ args }: PageProps) {
   const [pick, setOrder] = useState<'net' | 'score'>('net');
   const locked = !!data?.regime?.warn;
   const order = locked ? 'net' : pick;
+  const symSet = useMemo(() => new Set(items.map((it) => it.sym)), [items]);
+  const tick = useQuotesTick(1000, (changed) => [...changed].some((x) => symSet.has(x)));
+  // 실시간 순서 — 기준 뒤 이미 +15% 넘게 오른 후보·−10% 넘게 빠진 후보는 아래로 (번호 없이)
   const list = useMemo(() => {
     const key = order === 'net' ? 'rankNet' : 'rank';
-    return items.filter((it) => (it[key] ?? 999) <= 30).sort((a, b) => (a[key] ?? 999) - (b[key] ?? 999));
-  }, [items, order]);
+    const top = items.filter((it) => (it[key] ?? 999) <= 30);
+    return liveOrder(top, (it) => it[key] ?? 999, (it) => { const q = getQuote(it.sym); return q?.live ? pumpMove(it.price, q.price) : null; });
+  }, [items, order, tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const nOk = list.filter((o) => o.st === 'ok').length;
   const thr = data?.def?.sigThr ?? 90;
   const updated = data ? Date.parse(data.updatedAt) : NaN;
   const late = Number.isFinite(updated) && Date.now() - updated > 3 * 3600e3;
@@ -657,6 +696,7 @@ export default function PumpPage({ args }: PageProps) {
 
       <RegimeWarn data={data} />
       <Verdict data={data} stats={stats} />
+      <LiveSurge className="mb-2 sm:mb-3 lg:mb-4" />
 
       {isLoading && (
         <div className={cn(CARD_CLS, 'space-y-3 p-4')}>{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-14 rounded-xl bg-secondary" />)}</div>
@@ -668,7 +708,7 @@ export default function PumpPage({ args }: PageProps) {
         <div className="space-y-2 sm:space-y-3 lg:space-y-4">
           <section aria-labelledby="pump-list" className={cn(CARD_CLS, 'px-4 pt-4 pb-2 sm:px-5 sm:pt-5')}>
             <div className="mb-2 flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
-              <h2 id="pump-list" className="text-[18px] font-bold tracking-[-0.02em] md:text-[20px]">후보 {list.length}개</h2>
+              <h2 id="pump-list" className="text-[18px] font-bold tracking-[-0.02em] md:text-[20px]">후보 {nOk}개{list.length > nOk ? <span className="ml-1.5 text-[13px] font-semibold text-muted-foreground">· 이미 움직임 {list.length - nOk}개</span> : null}</h2>
               <span className="text-[12.5px] text-muted-foreground tabular" title={timeAgo(updated)}>
                 {data.asOfKst ? `${data.asOfKst} 기준` : ''} · {stampIso(data.updatedAt)} 갱신{late ? ' · 늦어지고 있어요' : ''}
               </span>
@@ -686,7 +726,12 @@ export default function PumpPage({ args }: PageProps) {
               <span className="max-sm:hidden"> 예상 %·확률은 과거 같은 점수였던 자리의 실제 결과예요.
                 {mk?.mkt_pump3 != null ? ` 지금 시장: 3일 전 기준 코인의 ${p0(mk.mkt_pump3)}가 펌핑했어요(평소 약 ${p0(stats?.base.pump ?? data.summary?.base?.pump)}).` : ''}</span>
             </p>
-            <ol>{list.map((it, k) => <Candidate key={it.code} it={it} rank={k + 1} mode={order} open={open.has(it.code)} onToggle={toggle} thr={thr} />)}</ol>
+            <ol>{list.map((o, k) => <Candidate key={o.x.code} it={o.x} rank={k + 1} st={o.st} mode={order} open={open.has(o.x.code)} onToggle={toggle} thr={thr} />)}</ol>
+            {list.length > nOk ? (
+              <p className="mt-1 mb-1 text-[12px] leading-[1.55] break-keep text-muted-foreground">
+                번호 없는 줄 = 점수를 낸 시각(기준) 가격보다 이미 +15% 넘게 올랐거나 −10% 넘게 빠진 후보예요. 점수는 그 전 가격 기준이라 실시간으로 아래로 내렸어요.
+              </p>
+            ) : null}
           </section>
           <SignalLog log={log} />
           <TrackRecord stats={stats} />

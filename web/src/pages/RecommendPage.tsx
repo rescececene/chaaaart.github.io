@@ -13,6 +13,7 @@ import { AiRange } from '@/components/common/RangeBar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ReasonText } from '@/components/chart/ForecastPanel';
 import { BtcCard } from '@/components/btc/BtcCard';
+import { LiveSurge } from '@/components/pump/LiveSurge';
 import { PumpTop } from '@/components/pump/PumpTop';
 import { RankTop } from '@/components/picks/RankTop';
 import { CautionChips, expDigits, fcWarn, fpct, fpp, toneOf } from '@/components/picks/rank';
@@ -318,14 +319,17 @@ export default function RecommendPage() {
 
   return (
     <div>
-      <PageTitle sub={<span className="break-keep">업비트 옆에 두고 보는 예측이에요. 숫자는 모두 지난 데이터로 검증했고, 맞았는지 매일 채점해요.</span>}>
+      <PageTitle sub={<span className="break-keep">업비트 옆에 두고 보는 예측이에요. 예측 숫자는 지난 데이터로 검증했고, 가격·채점은 실시간이에요.</span>}>
         추천<AiMark big />
       </PageTitle>
 
       <div className="space-y-2 sm:space-y-3 lg:space-y-4">
         <BtcCard />
         <div className="grid grid-cols-1 gap-2 sm:gap-3 lg:grid-cols-2 lg:items-start lg:gap-4">
-          <PumpTop />
+          <div className="space-y-2 sm:space-y-3 lg:space-y-4">
+            <LiveSurge />
+            <PumpTop />
+          </div>
           <RankTop />
         </div>
       </div>
